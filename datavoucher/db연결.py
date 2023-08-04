@@ -8,7 +8,7 @@ password = os.getenv('DB_PASSWORD')
 print('pw : ',password)
 
 try:
-    cnx = mysql.connector.connect(user='root', password='2rw4S@d3f4',
+    cnx = mysql.connector.connect(user='root', password='',
                                   host='localhost',
                                   database='testdb')
     print("Connection Successful")
@@ -27,7 +27,7 @@ else:
 mydb = mysql.connector.connect(
   host="localhost",
   user="root",
-  password='2rw4S@d3f4',
+  password='',
   database="testdb"
 )
 

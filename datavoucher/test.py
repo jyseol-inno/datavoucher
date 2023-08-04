@@ -11,7 +11,7 @@ db_config = {
     'database': 'testdb3'   # 데이터베이스 이름에 맞게 변경해주세요
 }
 
-# 회원가입 관련 테이블 생성 쿼리
+# 각각의 테이블 생성 쿼리
 create_table_queries = [
     """
     CREATE TABLE IF NOT EXISTS member_user (
@@ -48,7 +48,7 @@ create_table_queries = [
     """
 ]
 
-# MariaDB 연결 및 테이블 생성 쿼리문 여러개 실행
+# MariaDB 연결 및 테이블 생성
 conn = mysql.connector.connect(**db_config)
 cursor = conn.cursor()
 for query in create_table_queries:
@@ -61,29 +61,15 @@ conn.close()
 @app.route('/signup', methods=['POST'])
 def signup():
     data = request.get_json()
-
+    print("request.get_json() : " ,data)
     # 필수 필드 확인
-    required_fields = ['Name', 'Email_ID', 'Password', 'PhoneNumber', 
-                       'BusinessRegistrationNumber', 'CompanyName', 'CompanyAddress', 
-                       'CompanyPhoneNumber', 'Industry', 'EstablishedDate', 'CEO', 'CompanySize']
-    if not all(field in data for field in required_fields):
+    if 'Name' not in data or 'Email_ID' not in data or 'Password' not in data or 'PhoneNumber' not in data:
         return jsonify({'error': '모든 필드를 입력해주세요'}), 400
 
     name = data['Name']
     email = data['Email_ID']
     password = data['Password']
     phone = data['PhoneNumber']
-
-    company_info = {
-        'BusinessRegistrationNumber': data['BusinessRegistrationNumber'],
-        'CompanyName': data['CompanyName'],
-        'CompanyAddress': data['CompanyAddress'],
-        'CompanyPhoneNumber': data['CompanyPhoneNumber'],
-        'Industry': data['Industry'],
-        'EstablishedDate': data['EstablishedDate'],
-        'CEO': data['CEO'],
-        'CompanySize': data['CompanySize']
-    }
 
     try:
         # MariaDB 연결
@@ -99,20 +85,9 @@ def signup():
         insert_user_query = 'INSERT INTO member_user (Name, Email_ID, PhoneNumber) VALUES (%s, %s, %s)'
         cursor.execute(insert_user_query, (name, email, phone))
         member_no = cursor.lastrowid  # 새로 생성된 회원 번호 가져오기
-
+        print("member no : ", member_no)
         insert_auth_query = 'INSERT INTO member_authenticationinfo (MemberNo, Password) VALUES (%s, %s)'
         cursor.execute(insert_auth_query, (member_no, password))
-
-        # 기업 정보 저장
-        insert_company_query = """
-        INSERT INTO member_company (BusinessRegistrationNumber, CompanyName, MemberNo, 
-                                    CompanyAddress, CompanyPhoneNumber, Industry, EstablishedDate, CEO, CompanySize)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        cursor.execute(insert_company_query, 
-                       (company_info['BusinessRegistrationNumber'], company_info['CompanyName'], member_no, 
-                        company_info['CompanyAddress'], company_info['CompanyPhoneNumber'], company_info['Industry'], 
-                        company_info['EstablishedDate'], company_info['CEO'], company_info['CompanySize']))
 
         conn.commit()
 
@@ -147,3 +122,43 @@ if __name__ == '__main__':
 
 
 
+
+
+
+'''
+FLASK 웹 애플리케이션을 개발모드에서 실행하는 명령어
+일단 플라스크 애플리케이션이 있는 디렉토리로 이동  
+리눅스환경에서
+FLASK_APP=app.py FLASK_DEBUG=1 flask run
+
+윈도우환경에서  
+set FLASK_APP=app.py
+set FLASK_DEBUG=1
+flask run
+  
+
+개인정보 숨기기 버전
+from flask import Flask, jsonify, request, abort
+
+app = Flask(__name__)
+
+@app.route("/hello", methods=['GET'])
+def hello():
+  return "hello world"
+
+@app.route("/signup",methods=['POST'])
+def sign_up():
+    if not request.json or not 'name' in request.json or not 'email' in request.json or not 'password' in request.json or not 'profile' in request.json:
+        abort(400)
+    user = request.json
+    response = {
+        'name': user['name'],
+        'email': user['email'],
+        'profile': user['profile']
+    }
+    return jsonify(response), 200
+
+if __name__ == "__main__":
+  app.run(port=8000)
+
+  '''
