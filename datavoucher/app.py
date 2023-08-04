@@ -57,7 +57,7 @@ conn.commit()
 cursor.close()
 conn.close()
 
-
+# 회원가입
 @app.route('/signup', methods=['POST'])
 def signup():
     data = request.get_json()
@@ -122,7 +122,6 @@ def signup():
         return jsonify({'message': '회원가입이 완료되었습니다'}), 201
     except Exception as e:
         return jsonify({'error': '서버 오류가 발생했습니다'}), 500
-
 
 if __name__ == '__main__':
     app.run(debug=True)
