@@ -1,0 +1,50 @@
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ID Retrieval</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  </head>
+  <body>
+    <div class="container mt-5">
+      <h2>ID Retrieval</h2>
+      <form action="/request_verification_code" method="post" id="request-code-form">
+        <div class="form-group">
+          <label for="phone_number">Phone Number:</label>
+          <input type="text" class="form-control" id="phone_number" name="phone_number" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Request Verification Code</button>
+      </form>
+      <form action="/verify_code_and_get_id" method="post" id="verify-code-form" class="mt-4">
+        <div class="form-group">
+          <label for="code">Enter Verification Code:</label>
+          <input type="text" class="form-control" id="code" name="code" required>
+        </div>
+        <button type="submit" class="btn btn-success">Retrieve ID</button>
+      </form>
+      <div id="result" class="mt-4"></div>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+      // Use AJAX to handle form submissions without page refresh
+      $('#request-code-form').submit(function(e) {
+        e.preventDefault();
+        $.post($(this).attr('action'), $(this).serialize(), function(data) {
+          alert(data.message);
+        });
+      });
+      $('#verify-code-form').submit(function(e) {
+        e.preventDefault();
+        $.post($(this).attr('action'), $(this).serialize(), function(data) {
+          if (data.error) {
+            alert(data.error);
+          } else {
+            $('#result').html("Your ID is: " + data.email);
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

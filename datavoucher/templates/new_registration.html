@@ -1,0 +1,107 @@
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>회원가입</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  </head>
+  <body>
+    <div class="container mt-5">
+      <h2>회원가입</h2>
+      <form action="/signup" method="post">
+        <!-- User Info -->
+        <div class="form-group">
+          <label for="Email">Email:</label>
+          <input type="email" class="form-control" id="Email" name="Email" required>
+        </div>
+        <div class="form-group">
+          <label for="Password">Password:</label>
+          <input type="password" class="form-control" id="Password" name="Password" required>
+        </div>
+        <div class="form-group">
+          <label for="PhoneNumber">Phone Number:</label>
+          <input type="text" class="form-control" id="PhoneNumber" name="PhoneNumber" required>
+        </div>
+        <!-- Company Info -->
+        <div class="form-group">
+          <label for="BusinessRegistrationNumber">Business Registration Number:</label>
+          <input type="text" class="form-control" id="BusinessRegistrationNumber" name="BusinessRegistrationNumber" required>
+        </div>
+        <div class="form-group">
+          <label for="CEO">CEO:</label>
+          <input type="text" class="form-control" id="CEO" name="CEO" required>
+        </div>
+        <div class="form-group">
+          <label for="EstablishedDate">Established Date:</label>
+          <input type="date" class="form-control" id="EstablishedDate" name="EstablishedDate" required>
+        </div>
+        <div class="form-group">
+          <label for="CompanySize">Company Size:</label>
+          <select class="form-control" id="CompanySize" name="CompanySize">
+            <option value="소상공인">소상공인</option>
+            <option value="중소기업">중소기업</option>
+            <option value="중견기업">중견기업</option>
+            <option value="대기업">대기업</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="CompanyType">Company Type:</label>
+          <select class="form-control" id="CompanyType" name="CompanyType">
+            <option value="벤처기업">벤처기업</option>
+            <option value="여성기업">여성기업</option>
+            <option value="사회적기업">사회적기업</option>
+            <option value="장애인기업">장애인기업</option>
+            <option value="해당없음">해당없음</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="CompanyAddress">Company Address:</label>
+          <select class="form-control" id="CompanyAddress" name="CompanyAddress">
+            <option value="서울">서울</option>
+            <option value="경기">경기</option>
+            <option value="부산">부산</option>
+            <option value="대구">대구</option>
+            <option value="인천">인천</option>
+            <option value="광주">광주</option>
+            <option value="대전">대전</option>
+            <option value="울산">울산</option>
+            <option value="세종">세종</option>
+            <option value="경북">경북</option>
+            <option value="경남">경남</option>
+            <option value="전북">전북</option>
+            <option value="전남">전남</option>
+            <option value="충북">충북</option>
+            <option value="충남">충남</option>
+            <option value="강원">강원</option>
+            <option value="제주">제주</option>
+            <option value="해외">해외</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="EmployeeCount">Employee Count:</label>
+          <input type="number" class="form-control" id="EmployeeCount" name="EmployeeCount" required>
+        </div>
+        <div class="form-group">
+          <label for="InterestKeywords">Interest Keywords:</label>
+          <select class="form-control" id="InterestKeywords" name="InterestKeywords">
+            <option value="키워드1">키워드1</option>
+            <option value="키워드2">키워드2</option>
+            <option value="키워드3">키워드3</option>
+            <option value="키워드4">키워드4</option>
+            <option value="키워드5">키워드5</option>
+            <option value="키워드6">키워드6</option>
+            <option value="키워드7">키워드7</option>
+            <option value="키워드8">키워드8</option>
+            <option value="키워드9">키워드9</option>
+            <option value="키워드10">키워드10</option>
+            <option value="키워드11">키워드11</option>
+            <option value="키워드12">키워드12</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary">회원가입</button>
+      </form>
+    </div>
+  </body>
+</html>

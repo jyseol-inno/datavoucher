@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Welcome to Our Website</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        #left-sidebar {
+            width: 20%;
+            height: 100%;
+            padding: 20px;
+            border-right: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+        #left-sidebar button {
+            display: block;
+            margin-bottom: 20px;
+        }
+        #main-content {
+            width: 80%;
+            height: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #login-form input {
+            display: block;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="left-sidebar">
+        <button>Logo</button>
+        <button>공고검색 🔍</button>
+        <button>즐겨찾기</button>
+        <button>문서관리</button>
+    </div>
+    <div id="main-content">
+        <div style="text-align: right;">
+            <button>로그인</button> | <button>회원가입</button>
+        </div>
+        <form id="login-form" action="/login" method="post">
+            <input type="text" name="username" placeholder="아이디">
+            <input type="password" name="password" placeholder="비밀번호">
+            <input type="submit" value="로그인 시도">
+        </form>
+        <a href="/find_id">아이디 찾기</a> | <a href="/find_password">비밀번호 찾기</a>
+    </div>
+</body>
+</html>

@@ -19,7 +19,6 @@ db_config = {
 
 
 create_table_queries = [
-
     '''
     CREATE TABLE IF NOT EXISTS agreement (
     MemberNo INT,
@@ -28,9 +27,19 @@ create_table_queries = [
     AgreeMarketing BOOLEAN,
     FOREIGN KEY(MemberNo) REFERENCES member_user(MemberNo)
     );
+    ''',
 
     '''
+    CREATE TABLE IF NOT EXISTS phone_verification (
+    PhoneNumber VARCHAR(20) PRIMARY KEY,
+    VerificationCode VARCHAR(6) NOT NULL,
+    Expiry DATETIME NOT NULL
+    );
+   
+    '''
+    
 ]
+
 
 # MariaDB 연결 및 테이블 생성 쿼리문 여러개 실행
 conn = mysql.connector.connect(**db_config)
@@ -45,6 +54,11 @@ conn.close()
 def index():
     session['key'] = 'value'
     return 'hi'
+
+
+
+
+
 
 
 @app.route('/agreement', methods=['POST'])
@@ -69,6 +83,9 @@ def agreement():
 
 
 
+
+
+
 @app.route('/email_verification', methods=['POST'])
 def email_verification():
     data = request.get_json()
@@ -88,6 +105,12 @@ def email_verification():
     session['verification_code'] = verification_code
 
     return jsonify({'message': '인증 코드가 발송되었습니다'}), 200
+
+
+
+
+
+
 
 @app.route('/verify_code', methods=['POST'])
 def verify_code():
@@ -111,31 +134,38 @@ def verify_code():
 
 
 
+
+
+# ----------------------회원정보입력---------------------------#
+
 @app.route('/signup', methods=['POST'])
 def signup():
     data = request.get_json()
 
     # 필수 필드 확인
     required_fields = ['Name', 'Password', 'PhoneNumber', 
-                       'BusinessRegistrationNumber', 'CompanyName', 'CompanyAddress', 
-                       'CompanyPhoneNumber', 'Industry', 'EstablishedDate', 'CEO', 'CompanySize']
+                       'BusinessRegistrationNumber', 'EstablishedDate', 'CEO', 'CompanySize', 
+                       'CompanyType', 'CompanyAddress', 'EmployeeCount', 'InterestKeywords']
     if not all(field in data for field in required_fields):
         return jsonify({'error': '모든 필드를 입력해주세요'}), 400
 
     name = data['Name']
     password = data['Password']
     phone = data['PhoneNumber']
-
     company_info = {
         'BusinessRegistrationNumber': data['BusinessRegistrationNumber'],
-        'CompanyName': data['CompanyName'],
-        'CompanyAddress': data['CompanyAddress'],
-        'CompanyPhoneNumber': data['CompanyPhoneNumber'],
-        'Industry': data['Industry'],
-        'EstablishedDate': data['EstablishedDate'],
         'CEO': data['CEO'],
-        'CompanySize': data['CompanySize']
+        'EstablishedDate': data['EstablishedDate'],
+        'CompanySize': data['CompanySize'],
+        'CompanyType': data['CompanyType'],
+        'CompanyAddress': data['CompanyAddress'],
+        'EmployeeCount': data['EmployeeCount'],
+        'InterestKeywords': data['InterestKeywords']
     }
+       
+     
+        
+
 
     # 세션에서 이메일과 약관 동의 정보 가져오기
     email = session.get('email')
@@ -147,8 +177,7 @@ def signup():
     if not all([email, agree_service, agree_privacy, verified]):
         return jsonify({'error': '이메일 인증과 약관 동의를 먼저 완료해주세요'}), 400
 
-    # 나머지 코드는 동일...
-
+    
     try:
         # MariaDB 연결
         conn = mysql.connector.connect(**db_config)
@@ -169,9 +198,11 @@ def signup():
         
         # 기업 정보 저장
         insert_company_query = """
-        INSERT INTO member_company (BusinessRegistrationNumber, CompanyName, MemberNo, 
-                                    CompanyAddress, CompanyPhoneNumber, Industry, EstablishedDate, CEO, CompanySize)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO member_company (BusinessRegistrationNumber, CEO, EstablishedDate, 
+                            CompanySize, CompanyType, CompanyAddress, EmployeeCount, 
+                            InterestKeywords, MemberNo)
+        VALUES (%(BusinessRegistrationNumber)s, %(CEO)s, %(EstablishedDate)s, %(CompanySize)s, 
+        %(CompanyType)s, %(CompanyAddress)s, %(EmployeeCount)s, %(InterestKeywords)s, %s)
         """
         cursor.execute(insert_company_query, 
                        (company_info['BusinessRegistrationNumber'], company_info['CompanyName'], member_no, 
@@ -197,6 +228,8 @@ def signup():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+
 
 
 

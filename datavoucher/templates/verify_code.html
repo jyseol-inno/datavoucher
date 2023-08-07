@@ -1,0 +1,22 @@
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>인증 코드 확인</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  </head>
+  <body>
+    <div class="container mt-5">
+      <h2>인증 코드 확인</h2>
+      <form action="/verify_code" method="post">
+        <div class="form-group">
+          <label for="VerificationCode">인증 코드:</label>
+          <input type="text" class="form-control" id="VerificationCode" name="VerificationCode" required>
+        </div>
+        <button type="submit" class="btn btn-primary">인증 확인</button>
+      </form>
+    </div>
+  </body>
+</html>

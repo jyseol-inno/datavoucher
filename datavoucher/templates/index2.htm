@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Index Page</title>
+    <style>
+        .sidebar {
+            width: 20%;
+            position: fixed;
+            height: 100%;
+            background-color: #f8f9fa;
+            overflow: auto;
+            padding: 20px;
+        }
+        .main {
+            margin-left: 25%;
+            padding: 20px;
+        }
+        .main form input[type="text"],
+        .main form input[type="password"] {
+            display: block;
+            margin-bottom: 20px;
+        }
+        .main form input[type="submit"] {
+            display: block;
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+        .login-form {
+            width: 300px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <img src="/path/to/logo.png" alt="Logo" width="100">
+        <a href="/search"><img src="/path/to/search-icon.png" alt="Search"> 공고검색</a><br>
+        <a href="/favorites">즐겨찾기</a><br>
+        <a href="/documents">문서관리</a>
+    </div>
+    <div class="main">
+        <div style="text-align: right;">
+            <a href="/login">로그인</a> | <a href="/signup">회원가입</a>
+        </div>
+        <h1>Welcome</h1>
+        <div class="login-form">
+            <form action="/login" method="post">
+                <label for="username">아이디:</label>
+                <input type="text" id="username" name="username" placeholder="아이디">
+                <label for="password">비밀번호:</label>
+                <input type="password" id="password" name="password" placeholder="비밀번호">
+                <input type="submit" value="로그인">
+            </form>
+            <a href="/find_id">아이디 찾기</a><br>
+            <a href="/find_password">비밀번호 찾기</a>
+        </div>
+    </div>
+</body>
+</html>
