@@ -14,9 +14,9 @@ Session(app)  # 앱에 세션 설정 적용
 
 # MariaDB 연결 정보
 db_config = {
-    'host': 'localhost',
-    'user': 'root',     # 사용자 이름에 맞게 변경해주세요
-    'password': 'root', # 비밀번호에 맞게 변경해주세요
+    'host': '172.30.1.234',
+    'user': 'test',     # 사용자 이름에 맞게 변경해주세요
+    'password': 'test', # 비밀번호에 맞게 변경해주세요
     'database': 'testdb3'   # 데이터베이스 이름에 맞게 변경해주세요
 }
 
@@ -321,6 +321,35 @@ def signup():
         return jsonify({'message': '회원가입이 완료되었습니다'}), 201
     except Exception as e:
         return jsonify({'error': '서버 오류가 발생했습니다'}), 500
+
+@app.route('/accounts/check_email', methods=['GET'])
+def check_email():
+    data = request.get_json()
+    email = data.get('email')
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    sql = '''
+            SELECT COUNT(*)
+            FROM MEMBER_USER
+            WHERE Email_ID = %s
+          '''
+    
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
+
+    cursor.execute(sql, (email,))
+    result = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+
+    if result[0] > 0:
+        return jsonify({"result":"error", "description":"이메일 중복"})
+    else:
+        return jsonify({"result":"success", "description":"이메일 사용가능"})
+
 
 
 
