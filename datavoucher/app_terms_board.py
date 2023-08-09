@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, session, render_template
 from flask_session import Session  # 서버 측 세션을 위한 Flask-Session 추가
 import mysql.connector
 import random
-import datetime
+from datetime import datetime
 
 
 app = Flask(__name__)
@@ -259,10 +259,6 @@ def signup():
         'InterestKeywords': data['InterestKeywords']
     }
        
-     
-        
-
-
     # 세션에서 이메일과 약관 동의 정보 가져오기
     email = session.get('email')
     agree_service = session.get('agree_service')
@@ -404,53 +400,92 @@ def get_post_content(post_id):
     return jsonify({'Content': post[0]}), 200
 
 
-@app.route('/posts', methods=['GET'])
-def get_posts():
-    title = request.args.get('title')
-    executing_agency = request.args.get('executing_agency')
-    business_funds_min = request.args.get('business_funds_min')
-    business_funds_max = request.args.get('business_funds_max')
+@app.route('/post/lists', methods=['GET'])
+def get_post_list():
     
-    # Connect to the database
+    sql = '''
+            SELECT PostID, organization, notice, apply_end, tag, budget, views
+            FROM POSTS
+          '''
+
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
+    cursor.execute(sql)
+    posts = cursor.fetchall()
+
+    posts_list = []
+    for post in posts:
+        # print(post[3])
+        if (post[3]=='-'):
+            days_left = '확정안됨'
+        else:
+            deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
+            today = datetime.now().date()
+            days_left = (today - deadline).days
+        
+        post_dict = {
+            'PostID': post[0],
+            'organization': post[1],
+            'notice': post[2], 
+            'apply_end': days_left,
+            'tag': post[4],
+            'budget': post[5],
+            'views': post[6],
+        }
+        posts_list.append(post_dict)
+    total_count = len(posts_list)
+    return jsonify({"meta": {"total_count": total_count}, "documents": posts_list})
+
+@app.route('/post/lists/<int:PostID>', methods=['GET'])
+def get_post(PostID):
     conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor()
 
-    # Start building the query
-    query = "SELECT * FROM posts WHERE 1"
-    params = []
+    # 조회수 증가
+    update_sql = '''
+            UPDATE POSTS SET views = views + 1
+            WHERE PostID = '%s'
+          '''
+    cursor.execute(update_sql, (PostID,))
+    conn.commit()
 
-    # Add search conditions to the query based on the provided parameters
-    if title:
-        query += " AND Title LIKE %s"
-        params.append('%' + title + '%')
+    sql = '''
+            SELECT PostID, part, `object`, department, organization, post_date, notice, apply_start, apply_end, budget, overview
+            FROM POSTS
+            WHERE PostID = '%s'
+          '''
 
-    if executing_agency:
-        query += " AND ExecutingAgency=%s"
-        params.append(executing_agency)
+    cursor.execute(sql, (PostID,))
+    post = cursor.fetchall()
+    post = post[0]
+    
+    #print('post', post)
 
-    if business_funds_min:
-        query += " AND BusinessFunds >= %s"
-        params.append(business_funds_min)
-
-    if business_funds_max:
-        query += " AND BusinessFunds <= %s"
-        params.append(business_funds_max)
-
-    # Execute the query and fetch the results
-    cursor.execute(query, params)
-    posts = cursor.fetchall()
-
-    # Close the cursor and connection
-    cursor.close()
-    conn.close()
-
-    # Return the results as a JSON array
-    return jsonify(posts), 200
-
-
+    if (post[8]=='-'):
+            days_left = '확정안됨'
+    else:
+        deadline = datetime.strptime(post[8], '%Y-%m-%d').date()
+        today = datetime.now().date()
+        days_left = (today - deadline).days
+    
+    post_dict = {
+            'PostID': post[0],
+            'part': post[1],
+            'object' : post[2],
+            'department': post[3],
+            'organization': post[4],
+            'post_date': post[5],
+            'notice': post[6], 
+            'days_left': days_left,
+            'apply_start': post[7],
+            'apply_end': post[8],
+            'budget': post[9],
+            'overview': post[10]
+    }
+    return jsonify({"document" : post_dict})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', debug=True)
 
 
 
