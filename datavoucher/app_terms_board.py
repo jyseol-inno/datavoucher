@@ -3,6 +3,7 @@ from flask_session import Session  # 서버 측 세션을 위한 Flask-Session �
 import mysql.connector
 import random
 import datetime
+import logging
 
 
 app = Flask(__name__)
@@ -53,7 +54,6 @@ conn.commit()
 cursor.close()
 conn.close()
 
-from flask import render_template
 
 @app.route('/')
 def index():
@@ -61,10 +61,7 @@ def index():
 
 
 
-
-
-
-
+# -----------------------------------약관동의---------------------------------------
 @app.route('/agreement', methods=['POST'])
 def agreement():
     data = request.get_json()
@@ -89,7 +86,7 @@ def agreement():
 
 
 
-
+#---------------------------------가입시 이메일 인증---------------------------------------
 @app.route('/email_verification', methods=['POST'])
 def email_verification():
     data = request.get_json()
@@ -240,8 +237,8 @@ def signup():
 
     # 필수 필드 확인
     required_fields = ['Name', 'Password', 'PhoneNumber', 
-                       'BusinessRegistrationNumber', 'EstablishedDate', 'CEO', 'CompanySize', 
-                       'CompanyType', 'CompanyAddress', 'EmployeeCount', 'InterestKeywords']
+                       'BusinessRegistrationNumber', 'CompanyAddress', 'EstablishedDate', 'CEO', 'CompanySize', 
+                       'CompanyType', 'EmployeeCount', 'InterestKeywords']
     if not all(field in data for field in required_fields):
         return jsonify({'error': '모든 필드를 입력해주세요'}), 400
 
@@ -250,18 +247,14 @@ def signup():
     phone = data['PhoneNumber']
     company_info = {
         'BusinessRegistrationNumber': data['BusinessRegistrationNumber'],
-        'CEO': data['CEO'],
+        'CompanyAddress': data['CompanyAddress'],
         'EstablishedDate': data['EstablishedDate'],
+        'CEO': data['CEO'],
         'CompanySize': data['CompanySize'],
         'CompanyType': data['CompanyType'],
-        'CompanyAddress': data['CompanyAddress'],
         'EmployeeCount': data['EmployeeCount'],
         'InterestKeywords': data['InterestKeywords']
     }
-       
-     
-        
-
 
     # 세션에서 이메일과 약관 동의 정보 가져오기
     email = session.get('email')
@@ -273,55 +266,54 @@ def signup():
     if not all([email, agree_service, agree_privacy, verified]):
         return jsonify({'error': '이메일 인증과 약관 동의를 먼저 완료해주세요'}), 400
 
-    
-    try:
+    # try:
         # MariaDB 연결
-        conn = mysql.connector.connect(**db_config)
-        cursor = conn.cursor()
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
 
-        # 이메일 중복 확인
-        cursor.execute('SELECT * FROM member_user WHERE Email_ID=%s', (email,))
-        if cursor.fetchone() is not None:
-            return jsonify({'error': '이미 가입된 이메일입니다'}), 409
+    # 회원가입 정보 저장
+    insert_user_query = 'INSERT INTO member_user (Name, Email_ID, PhoneNumber) VALUES (%s, %s, %s)'
+    cursor.execute(insert_user_query, (name, email, phone))
+    member_no = cursor.lastrowid  # 새로 생성된 회원 번호 가져오기
 
-        # 회원가입 정보 저장
-        insert_user_query = 'INSERT INTO member_user (Name, Email_ID, PhoneNumber) VALUES (%s, %s, %s)'
-        cursor.execute(insert_user_query, (name, email, phone))
-        member_no = cursor.lastrowid  # 새로 생성된 회원 번호 가져오기
+    insert_auth_query = 'INSERT INTO member_authenticationinfo (MemberNo, Password) VALUES (%s, %s)'
+    cursor.execute(insert_auth_query, (member_no, password))
 
-        insert_auth_query = 'INSERT INTO member_authenticationinfo (MemberNo, Password) VALUES (%s, %s)'
-        cursor.execute(insert_auth_query, (member_no, password))
-        
-        # 기업 정보 저장
-        insert_company_query = """
-        INSERT INTO member_company (BusinessRegistrationNumber, CEO, EstablishedDate, 
-                            CompanySize, CompanyType, CompanyAddress, EmployeeCount, 
-                            InterestKeywords, MemberNo)
-        VALUES (%(BusinessRegistrationNumber)s, %(CEO)s, %(EstablishedDate)s, %(CompanySize)s, 
-        %(CompanyType)s, %(CompanyAddress)s, %(EmployeeCount)s, %(InterestKeywords)s, %s)
-        """
-        cursor.execute(insert_company_query, 
-                       (company_info['BusinessRegistrationNumber'], company_info['CompanyName'], member_no, 
-                        company_info['CompanyAddress'], company_info['CompanyPhoneNumber'], company_info['Industry'], 
-                        company_info['EstablishedDate'], company_info['CEO'], company_info['CompanySize']))
-        
-        # 약관 동의 정보 저장
-        insert_agreement_query = 'INSERT INTO agreement (MemberNo, AgreeService, AgreePrivacy, AgreeMarketing) VALUES (%s, %s, %s, %s)'
-        cursor.execute(insert_agreement_query, (member_no, agree_service, agree_privacy, agree_marketing))
+    # 기업 정보 저장
+    insert_company_query = '''
+    INSERT INTO member_company (BusinessRegistrationNumber, MemberNo, CompanyAddress, EstablishedDate, 
+                                CEO, CompanySize, CompanyType, EmployeeCount, 
+                                InterestKeywords)
+    VALUES (%s, %s, %s, %s, 
+            %s, %s, %s, %s, 
+            %s)
+    '''
+    cursor.execute(insert_company_query, 
+                    (company_info['BusinessRegistrationNumber'], member_no, company_info['CompanyAddress'], 
+                    company_info['EstablishedDate'], company_info['CEO'], company_info['CompanySize'], 
+                    company_info['CompanyType'], company_info['EmployeeCount'], company_info['InterestKeywords']
+                    ))
 
-        conn.commit()
+    # 약관 동의 정보 저장
+    insert_agreement_query = 'INSERT INTO agreement (MemberNo, AgreeService, AgreePrivacy, AgreeMarketing) VALUES (%s, %s, %s, %s)'
+    cursor.execute(insert_agreement_query, (member_no, agree_service, agree_privacy, agree_marketing))
 
-        cursor.close()
-        conn.close()
+    conn.commit()
 
-        # 세션에서 이메일과 약관 동의 정보 삭제
-        for key in ['email', 'agree_service', 'agree_privacy', 'agree_marketing', 'verification_code']:
-            session.pop(key, None)
+    cursor.close()
+    conn.close()
 
-        return jsonify({'message': '회원가입이 완료되었습니다'}), 201
-    except Exception as e:
-        return jsonify({'error': '서버 오류가 발생했습니다'}), 500
+    # 세션에서 이메일과 약관 동의 정보 삭제
+    for key in ['email', 'agree_service', 'agree_privacy', 'agree_marketing', 'verification_code']:
+        session.pop(key, None)
 
+    return jsonify({'message': '회원가입이 완료되었습니다'}), 201
+    
+    # except Exception as e:
+    #     print(f"Exception occurred: {e}")
+    #     return jsonify({'error': '서버 오류가 발생했습니다'}), 500
+
+# 이메일 중복확인
 @app.route('/accounts/check_email', methods=['GET'])
 def check_email():
     data = request.get_json()
