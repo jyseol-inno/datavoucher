@@ -1,9 +1,10 @@
-from flask import Flask, request, jsonify, session, render_template
+from flask import Flask, Response, request, jsonify, session, render_template, send_from_directory, send_file
 from flask_session import Session  # 서버 측 세션을 위한 Flask-Session 추가
 import mysql.connector
 import random
 from datetime import datetime
-
+import os
+import urllib.parse
 
 app = Flask(__name__)
 app.config['SESSION_TYPE'] = 'filesystem'  # 세션 데이터를 파일 시스템에 저장
@@ -342,60 +343,6 @@ def check_email():
     else:
         return jsonify({"result":"success", "description":"이메일 사용가능"})
 
-
-
-
-
-@app.route('/posts', methods=['POST'])
-def create_post():
-    data = request.get_json()
-
-    required_fields = ['RemainingTime', 'Tags', 'ExecutingAgency', 'Title', 'BusinessFunds', 'DataField', 'BusinessPurpose', 'Department', 'Content']
-    if not all(field in data for field in required_fields):
-        return jsonify({'error': 'All fields are required'}), 400
-
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-
-    insert_query = """
-    INSERT INTO posts (RemainingTime, Tags, ExecutingAgency, Title, BusinessFunds, DataField, BusinessPurpose, Department, PostDate, Content)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
-    """
-    cursor.execute(insert_query, (data['RemainingTime'], data['Tags'], data['ExecutingAgency'], data['Title'], data['BusinessFunds'], data['DataField'], data['BusinessPurpose'], data['Department'], data['Content']))
-    conn.commit()
-
-    cursor.close()
-    conn.close()
-
-    return jsonify({'message': 'Post created'}), 201
-
-
-
-# 게시물 조회시 내용 GET하고 조회수 카운트 해주는 역할
-@app.route('/posts/<int:post_id>/content', methods=['GET'])
-def get_post_content(post_id):
-    # Connect to the database
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-    
-    # Get the post
-    cursor.execute('SELECT Content FROM posts WHERE PostID=%s', (post_id,))
-    post = cursor.fetchone()
-    
-    if post is None:
-        return jsonify({'message': 'Post not found'}), 404
-
-    # Increment the view count
-    cursor.execute('UPDATE posts SET Views = Views + 1 WHERE PostID=%s', (post_id,))
-    conn.commit()
-
-    # Close the cursor and connection
-    cursor.close()
-    conn.close()
-
-    return jsonify({'Content': post[0]}), 200
-
-
 @app.route('/post/lists', methods=['GET'])
 def get_post_list():
     
@@ -432,6 +379,27 @@ def get_post_list():
     total_count = len(posts_list)
     return jsonify({"meta": {"total_count": total_count}, "documents": posts_list})
 
+@app.route('/post/lists/<int:PostID>/download/<string:pfi_originname>')
+def download_attachment(PostID, pfi_originname):
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
+
+    sql = '''
+            SELECT pfi_originname, pfi_filename
+            FROM POST_FILE
+            WHERE PostID = %s and pfi_originname = %s
+          '''
+        
+    cursor.execute(sql, (PostID, pfi_originname,))
+    attachment = cursor.fetchone()
+    pfi_originname = attachment[0]
+    pfi_filename = attachment[1]
+    attachment_folder = 'attachment_folder'
+    script_dir = os.path.dirname(__file__)
+    filepath = os.path.join(script_dir, attachment_folder, pfi_filename)
+    #print('filepath', filepath)
+    return send_file(filepath, as_attachment=True, download_name=pfi_originname)
+
 @app.route('/post/lists/<int:PostID>', methods=['GET'])
 def get_post(PostID):
     conn = mysql.connector.connect(**db_config)
@@ -440,7 +408,7 @@ def get_post(PostID):
     # 조회수 증가
     update_sql = '''
             UPDATE POSTS SET views = views + 1
-            WHERE PostID = '%s'
+            WHERE PostID = %s
           '''
     cursor.execute(update_sql, (PostID,))
     conn.commit()
@@ -448,7 +416,7 @@ def get_post(PostID):
     sql = '''
             SELECT PostID, part, `object`, department, organization, post_date, notice, apply_start, apply_end, budget, overview
             FROM POSTS
-            WHERE PostID = '%s'
+            WHERE PostID = %s
           '''
 
     cursor.execute(sql, (PostID,))
@@ -456,7 +424,26 @@ def get_post(PostID):
     post = post[0]
     
     #print('post', post)
+    # 첨부파일
+    sql = '''
+            SELECT pfi_originname, pfi_filename
+            FROM POST_FILE
+            WHERE PostID = %s
+          '''
 
+    cursor.execute(sql, (PostID,))
+    attachments = cursor.fetchall()
+    attachment_list = []
+    for attachment in attachments:
+        attachment_list.append(
+            {
+                'pfi_originname':attachment[0],
+                'pfi_filename':attachment[1]
+            }
+        )
+    
+    # print('attachment_list', attachment_list)
+    
     if (post[8]=='-'):
             days_left = '확정안됨'
     else:
@@ -476,7 +463,8 @@ def get_post(PostID):
             'apply_start': post[7],
             'apply_end': post[8],
             'budget': post[9],
-            'overview': post[10]
+            'overview': post[10],
+            'attachments': attachment_list
     }
     return jsonify({"document" : post_dict})
 
