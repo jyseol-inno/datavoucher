@@ -136,99 +136,91 @@ def verify_code():
     return jsonify({'message': '인증에 성공하였습니다'}), 200
 
 
-# -----------------------ID 찾기------------------------------------------------------------------------------------------
+# -----------------------ID 찾기-----------------------------------------------------------------------------------------------------------------------------------------------
 def send_sms(phone_number, code):
-    # Fake SMS function. In a real-world scenario, you would integrate with an SMS API to send the code.
+    # 문자메세지를 받았다 가정하는 함수. 실제로는 sms 수신 API를 구성해야 합나더,
     print(f"Sending verification code {code} to phone number {phone_number}")
 
-@app.route('/request_verification_code', methods=['POST'])
-def request_verification_code():
-    phone_number = request.json.get('phone_number')
-    if not phone_number:
-        return jsonify({"error": "Phone number is required"}), 400
-
-    # Check if the phone number exists in the member_user table
+# 인증번호 생성 및 저장
+def generate_and_save_verification_code(phone_number):
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor(buffered=True)
+    # 번호 가입자 테이블에 휴대폰 번호 입력했는지 확인
     cursor.execute("SELECT 1 FROM member_user WHERE PhoneNumber=%s", (phone_number,))
     if not cursor.fetchone():
-        return jsonify({"error": "Phone number not registered"}), 400
+        print("전화번호가 DB에 없습니다.") # 로깅 또는 다른 처리
+        cursor.close()
+        conn.close()
+        return None # DB에 저장하지 않고 None 반환
 
     # Generate a random 6-digit code
     code = ''.join(random.choices(string.digits, k=6))
-
     # Save the code to the database with an expiry time of 10 minutes
     expiry_time = datetime.datetime.now() + datetime.timedelta(minutes=10)
-    cursor.execute("INSERT INTO phone_verification (PhoneNumber, VerificationCode, Expiry) VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE VerificationCode=%s, Expiry=%s", 
-                   (phone_number, code, expiry_time, code, expiry_time))
-    conn.commit()
 
-    # Send the code via SMS (fake function for this example)
-    send_sms(phone_number, code)
-
-    return jsonify({"message": "Verification code sent!"}), 200
-
-@app.route('/verify_code_and_get_id', methods=['POST'])
-def verify_code_and_get_id():
-    phone_number = request.json.get('phone_number')
-    user_code = request.json.get('code')
-    
-    if not phone_number or not user_code:
-        return jsonify({"error": "Phone number and code are required"}), 400
-
-    cursor.execute("SELECT VerificationCode, Expiry FROM phone_verification WHERE PhoneNumber=%s", (phone_number,))
-    result = cursor.fetchone()
-
-    if not result:
-        return jsonify({"error": "Verification code not found"}), 400
-
-    actual_code, expiry = result
-
-    if datetime.datetime.now() > expiry:
-        return jsonify({"error": "Verification code has expired"}), 400
-
-    if user_code != actual_code:
-        return jsonify({"error": "Incorrect verification code"}), 400
-
-    cursor.execute("SELECT Email_ID FROM member_user WHERE PhoneNumber=%s", (phone_number,))
-    email = cursor.fetchone()[0]
-
-    return jsonify({"email": email}), 200
-
-
-
-
-
-
-@app.route('/send_verification_code', methods=['POST'])
-def send_verification_code():
-    data = request.get_json()
-    phone_number = data.get('PhoneNumber')
-
-    # connect to the database
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-
-    # check if the phone number exists in the member_user table
-    cursor.execute('SELECT * FROM member_user WHERE PhoneNumber=%s', (phone_number,))
-    if cursor.fetchone() is None:
-        return jsonify({'error': '등록되지 않은 전화번호입니다'}), 400
-
-    # generate a random verification code
-    verification_code = '123456'
-
-    # calculate the expiry time for the verification code
-    expiry = datetime.datetime.now() + datetime.timedelta(minutes=10)
-
-    # insert the verification code into the phone_verification table
     cursor.execute(
-        'INSERT INTO phone_verification (PhoneNumber, VerificationCode, Expiry) VALUES (%s, %s, %s)',
-        (phone_number, verification_code, expiry)
+        "INSERT INTO phone_verification (PhoneNumber, VerificationCode, Expiry) VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE VerificationCode=%s, Expiry=%s",
+        (phone_number, code, expiry_time, code, expiry_time)
     )
 
     conn.commit()
     cursor.close()
     conn.close()
 
-    return jsonify({'message': '인증 코드가 발송되었습니다'}), 200
+    send_sms(phone_number, code)  # send_sms가 실제 문자를 보낸다고 가정
+
+    return code
+
+# 인증번호 요청
+@app.route('/ID_find/request_code', methods=['POST'])
+def request_verification_code():
+    try:
+        phone_number = request.json.get('phone_number')
+        session['phone_number'] = phone_number
+        if not phone_number:
+            return jsonify({"error": "휴대폰 번호 입력은 필수입니다."}), 400
+
+        code = generate_and_save_verification_code(phone_number)
+        if code is None:
+            return jsonify({"error": "가입하신 전화번호와 일치하지 않습니다."}), 400
+
+        return jsonify({"message": "인증코드를 보냈습니다.!", "verification_code": code}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/ID_find/verify_code', methods=['POST'])
+def verify_code_and_get_id():
+    try:
+        phone_number = session.get('phone_number')
+        if phone_number is None:
+            return jsonify({"error": "휴대전화 번호가 없습니다. 인증 코드 요청부터 다시 시작해주세요."}), 400
+        user_code = request.json.get('code')
+        if not phone_number or not user_code:
+            return jsonify({"error": "전화번호와 인증 코드는 필수입니다"}), 400
+
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor(buffered=True)
+        cursor.execute("SELECT VerificationCode, Expiry FROM phone_verification WHERE PhoneNumber=%s", (phone_number,))
+        actual_code, expiry = cursor.fetchone()
+
+        if datetime.datetime.now() > expiry:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "인증 코드가 만료되었습니다"}), 400
+
+        if user_code != actual_code:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "인증 코드가 일치하지 않습니다"}), 400
+
+        cursor.execute("SELECT Email_ID FROM member_user WHERE PhoneNumber=%s", (phone_number,))
+        email = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return jsonify({"email": email, "message": "인증에 성공하였습니다"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ----------------------회원정보입력---------------------------#
