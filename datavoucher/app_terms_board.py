@@ -441,22 +441,81 @@ def check_email():
 def login():
     data = request.get_json()
     email = data['Email_ID']
-    password = data['Password'].encode('utf-8') # 입력받은 패스워드 인코딩
+    password = data['Password'].encode('utf-8')  # 입력받은 패스워드 인코딩
 
     conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor()
 
-    # DB에서 해당 이메일의 해시된 패스워드 가져오기
-    cursor.execute("SELECT Password FROM member_authenticationinfo WHERE MemberNo = (SELECT MemberNo FROM member_user WHERE Email_ID=%s)", (email,))
-    stored_hashed_password = cursor.fetchone()[0].encode('utf-8') # DB에 저장된 해시된 패스워드
+    # DB에서 해당 이메일의 회원번호와 해시된 패스워드 가져오기
+    cursor.execute("SELECT member_authenticationinfo.Password, member_user.MemberNo FROM member_authenticationinfo JOIN member_user ON member_authenticationinfo.MemberNo = member_user.MemberNo WHERE Email_ID=%s", (email,))
+    result = cursor.fetchone()
+    if result:
+        stored_hashed_password = result[0].encode('utf-8')  # DB에 저장된 해시된 패스워드
+        user_id = result[1]  # DB에 저장된 회원번호
 
-    # 해시된 패스워드와 입력받은 패스워드 비교
-    if bcrypt.checkpw(password, stored_hashed_password):
-        # 로그인 성공
-        return jsonify({'message': '로그인 성공'}), 200
-    else:
-        # 로그인 실패
-        return jsonify({'error': '로그인 실패'}), 401
+        # 해시된 패스워드와 입력받은 패스워드 비교
+        if bcrypt.checkpw(password, stored_hashed_password):
+            # 로그인 성공시 사용자 ID를 세션에 저장
+            session['user_id'] = user_id
+            return jsonify({'message': '로그인 성공'}), 200
+
+    # 로그인 실패
+    return jsonify({'error': '로그인 실패'}), 401
+
+
+#-------------------------------------------------------------- 로그아웃-------------------------------------------------------------
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    # 세션에서 사용자 ID 제거
+    session.pop('user_id', None)
+
+    return jsonify({'message': '로그아웃 성공'}), 200
+
+#-----------------------------------------------------회원정보 변경------------------------------------------------------------------
+
+
+@app.route('/update_profile', methods=['POST'])
+def update_profile():
+    user_id = session.get('user_id')
+    if user_id is None:
+        return jsonify({'error': '로그인이 필요합니다'}), 401
+
+    data = request.get_json()
+
+    company_info = {
+        'CompanyAddress': data['CompanyAddress'],  
+        "CompanySize" : data['CompanySize'],
+        'CompanyType': data['CompanyType'],
+        'EmployeeCount': data['EmployeeCount'],
+        'InterestKeywords': data['InterestKeywords']
+    }
+
+    agree_marketing = data['AgreeMarketing']
+
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
+
+    update_company_query = '''
+    UPDATE member_company
+    SET CompanyAddress=%s, CompanySize=%s,
+        CompanyType=%s, EmployeeCount=%s, InterestKeywords=%s
+    WHERE MemberNo = %s
+    '''
+    cursor.execute(update_company_query, 
+                    (company_info['CompanyAddress'], company_info['CompanySize'],
+                     company_info['CompanyType'], company_info['EmployeeCount'], company_info['InterestKeywords'], user_id
+                    ))
+
+    # 마케팅 수신 동의 정보 업데이트
+    update_agreement_query = 'UPDATE agreement SET AgreeMarketing=%s WHERE MemberNo=%s'
+    cursor.execute(update_agreement_query, (data['AgreeMarketing'], user_id))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return jsonify({'message': '프로필 업데이트 완료'}), 200
 
 
 #-----------------------------------------------------------------------------------------------------------------------------------
