@@ -5,6 +5,8 @@ import random
 from datetime import datetime
 import os
 import urllib.parse
+import copy
+import pandas as pd
 
 app = Flask(__name__)
 app.config['SESSION_TYPE'] = 'filesystem'  # 세션 데이터를 파일 시스템에 저장
@@ -348,7 +350,7 @@ def get_post_list():
     
     sql = '''
             SELECT PostID, organization, notice, apply_end, tag, budget, views
-            FROM POSTS
+            FROM POSTS 
           '''
 
     conn = mysql.connector.connect(**db_config)
@@ -379,7 +381,7 @@ def get_post_list():
     total_count = len(posts_list)
     return jsonify({"meta": {"total_count": total_count}, "documents": posts_list})
 
-@app.route('/post/lists/<int:PostID>/download/<string:pfi_originname>')
+@app.route('/post/lists/<int:PostID>/download/<string:pfi_originname>', methods=['GET'])
 def download_attachment(PostID, pfi_originname):
     conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor()
@@ -467,6 +469,100 @@ def get_post(PostID):
             'attachments': attachment_list
     }
     return jsonify({"document" : post_dict})
+
+@app.route('/post/lists/search', methods=['GET'])
+def get_search_post_list():
+    data = request.get_json()
+    department = data.get('department', [])
+    company = data.get('company', [])
+    supportType = data.get('supportType', [])
+    part = data.get('part', [])
+    postDateYN = data.get('postDateYN', 'Y')
+    startDate = data.get('startDate')
+    endDate = data.get('endDate')
+    registerClosingYN = data.get('registerClosingYN', 'Y')
+    # startBudget = data.get('startBudget')
+    # endBudget = data.get('endBudget')
+    if not department and not company and not supportType and not part and not postDateYN and not startDate and not endDate and not registerClosingYN:
+    # if not department:
+        return get_post_list()
+    else:
+        conditions = []
+        params = []
+
+        # 서울특별시, 경기도, 인천광역시, 강원도, 충청남도, 대전광역시,
+        # 충청북도, 세종특별자치시, 부산광역시, 울산광역시, 대구광역시,
+        # 경상북도, 경상남도, 전라남도, 광주광역시, 전라북도, 제주특별자치도, 중앙부처
+        if department:
+            if '중앙부처' in department:
+                department.remove('중앙부처')
+                department.extend(['산업통상자원부', '고용노동부', '중소벤처기업부', '과학기술정보통신부', '문화체육관광부', '농림축산식품부', '해양수산부', '국토교통부', '환경부', '방위사업청', '보건복지부',
+                '여성가족부', '교육부'])
+            conditions.append("department IN (" + ','.join('%s' for _ in department) + ")")
+            params.extend(department)
+        # ['사회적기업', '중소기업', '소상공인', '장애인기업', '여성기업', '벤처기업']
+        if company:
+            conditions.append("company IN (" + ','.join('%s' for _ in company) + ")")
+            params.extend(company)
+        # ["일반", "청년", "여성", "장애인"]
+        if supportType:
+            if '일반' in supportType:
+                filtered_list = [item for item in supportType if item != '일반']
+                not_like_conditions = ' AND '.join([f"notice NOT LIKE %s" for _ in filtered_list])
+                like_conditions = ' OR '.join([f"notice LIKE %s" for _ in filtered_list])        
+                conditions.append(f"(({not_like_conditions}) OR ({like_conditions}))")
+                params.extend(['%' + keyword + '%' for keyword in filtered_list])
+                params.extend(['%' + keyword + '%' for keyword in filtered_list])
+            else:
+                like_conditions = ' OR '.join([f"notice LIKE %s" for _ in supportType])
+                conditions.append(f"({like_conditions})")
+                params.extend(['%' + keyword + '%' for keyword in supportType])
+        # ['인력']            
+        if part:
+            conditions.append("part IN (" + ','.join('%s' for _ in part) + ")")
+            params.extend(part)
+        if postDateYN=='Y':   
+            conditions.append("post_date >= %s AND post_date <= %s")
+            params.extend([startDate, endDate])
+        elif postDateYN=='N':
+            conditions.append("apply_start >= %s AND apply_end <= %s")
+            params.extend([startDate, endDate])
+        if registerClosingYN=='Y':
+            today = datetime.now().date()
+            conditions.append("apply_end >= %s")
+            params.append(str(today))
+            
+        sql = "SELECT PostID, organization, notice, apply_end, tag, budget, views FROM POSTS WHERE "
+        sql = sql + ' AND '.join(conditions)
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        searched_posts = cursor.fetchall()
+        # columns = ['PostID', 'organization', 'notice', 'apply_end', 'tag', 'budget', 'views']
+        # df = pd.DataFrame(searched_posts, columns=columns)
+        # print(df.head())
+        search_posts_list = []
+        for post in searched_posts:
+            # print(post[3])
+            if (post[3]=='-'):
+                days_left = '확정안됨'
+            else:
+                deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
+                today = datetime.now().date()
+                days_left = (today - deadline).days
+            
+            post_dict = {
+                'PostID': post[0],
+                'organization': post[1],
+                'notice': post[2], 
+                'apply_end': days_left,
+                'tag': post[4],
+                'budget': post[5],
+                'views': post[6],
+            }
+            search_posts_list.append(post_dict)
+        total_count = len(search_posts_list)
+        return jsonify({"meta": {"total_count": total_count}, "documents": search_posts_list})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True)
