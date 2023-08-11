@@ -8,6 +8,8 @@ import urllib.parse
 import copy
 import pandas as pd
 import datetime
+import string
+import bcrypt
 
 app = Flask(__name__)
 app.config['SESSION_TYPE'] = 'filesystem'  # 세션 데이터를 파일 시스템에 저장
@@ -137,9 +139,9 @@ def verify_code():
     return jsonify({'message': '인증에 성공하였습니다'}), 200
 
 
-# -----------------------ID 찾기-----------------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------ID 찾기------------------------------------------------------------------------------------------------
 def send_sms(phone_number, code):
-    # 문자메세지를 받았다 가정하는 함수. 실제로는 sms 수신 API를 구성해야 합나더,
+    # 문자메세지를 받았다 가정하는 함수. 실제로는 sms 수신 API를 구성해야 합니다
     print(f"Sending verification code {code} to phone number {phone_number}")
 
 # 인증번호 생성 및 저장
@@ -222,9 +224,103 @@ def verify_code_and_get_id():
         return jsonify({"email": email, "message": "인증에 성공하였습니다"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+#---------------------------------------비밀번호찾기 / 재설정 -----------------------------------------------------
+
+def generate_and_save_password_reset_code(email, phone_number):
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor(buffered=True)
+    cursor.execute("SELECT 1 FROM member_user WHERE Email_ID=%s AND PhoneNumber=%s", (email, phone_number))
+    if not cursor.fetchone():
+        cursor.close()
+        conn.close()
+        return None
+
+    code = ''.join(random.choices(string.digits, k=6))
+    expiry_time = datetime.datetime.now() + datetime.timedelta(minutes=5)
 
 
-# ----------------------회원정보입력---------------------------#
+    cursor.execute(
+        "INSERT INTO password_reset (Email_ID, PhoneNumber, ResetCode, Expiry) VALUES (%s, %s, %s, %s) ON DUPLICATE KEY UPDATE ResetCode=%s, Expiry=%s",
+        (email, phone_number, code, expiry_time, code, expiry_time)
+    )
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    send_sms(phone_number, code)
+    return code
+
+# 비밀번호 재설정 코드 요청
+@app.route('/pw_find/send_code', methods=['POST'])
+def send_password_reset_code():
+    try:
+        email = request.json.get('Email_ID')
+        phone_number = request.json.get('phone_number')
+        session['phone_number'] = phone_number
+        session['email'] = email
+
+        # 이메일과 휴대폰 번호 일치 확인
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor(buffered=True)
+        cursor.execute("SELECT 1 FROM member_user WHERE Email_ID=%s AND PhoneNumber=%s", (email, phone_number))
+        if not cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "입력하신 이메일과 전화번호와 일치하는 계정을 찾을 수 없습니다."}), 400
+        cursor.close()
+        conn.close()
+
+        code = generate_and_save_verification_code(phone_number)  # 기존 인증 코드 생성 함수 사용
+        return jsonify({"message": "인증코드를 보냈습니다.!", "verification_code": code}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/pw_find/reset_password', methods=['POST'])
+def reset_password():
+    try:
+        email = session.get('email') # 이메일도 세션에서 가져오기
+        phone_number = session.get('phone_number')
+        user_code = request.json.get('code')
+        new_password = request.json.get('new_password')
+        new_password_confirm = request.json.get('new_password_confirm')
+
+        if not email or not phone_number or not user_code or not new_password or not new_password_confirm:
+            return jsonify({"error": "모든 필드를 채워야 합니다"}), 400
+
+        if new_password != new_password_confirm:
+            return jsonify({"error": "새 비밀번호가 일치하지 않습니다"}), 400
+
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor(buffered=True)
+        cursor.execute("SELECT VerificationCode, Expiry FROM phone_verification WHERE PhoneNumber=%s", (phone_number,))
+        actual_code, expiry = cursor.fetchone()
+
+        if datetime.datetime.now() > expiry:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "인증 코드가 만료되었습니다"}), 400
+
+        if user_code != actual_code:
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "인증 코드가 일치하지 않습니다"}), 400
+
+        # 이메일과 전화번호를 모두 사용하여 사용자 식별
+        cursor.execute("UPDATE member_authenticationinfo SET Password=%s WHERE MemberNo=(SELECT MemberNo FROM member_user WHERE PhoneNumber=%s AND Email_ID=%s)", (new_password, phone_number, email))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"message": "비밀번호가 성공적으로 변경되었습니다"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+# -----------------------------------------------회원정보입력----------------------------------------------------
 
 @app.route('/signup', methods=['POST'])
 def signup():
@@ -238,7 +334,8 @@ def signup():
         return jsonify({'error': '모든 필드를 입력해주세요'}), 400
 
     name = data['Name']
-    password = data['Password']
+    password = data['Password'].encode('utf-8') # 패스워드 인코딩
+    hashed_password = bcrypt.hashpw(password, bcrypt.gensalt())  # 패스워드 해싱
     phone = data['PhoneNumber']
     company_info = {
         'BusinessRegistrationNumber': data['BusinessRegistrationNumber'],
@@ -271,9 +368,9 @@ def signup():
     insert_user_query = 'INSERT INTO member_user (Name, Email_ID, PhoneNumber) VALUES (%s, %s, %s)'
     cursor.execute(insert_user_query, (name, email, phone))
     member_no = cursor.lastrowid  # 새로 생성된 회원 번호 가져오기
-
+    # 패스워드 해싱하여 저장
     insert_auth_query = 'INSERT INTO member_authenticationinfo (MemberNo, Password) VALUES (%s, %s)'
-    cursor.execute(insert_auth_query, (member_no, password))
+    cursor.execute(insert_auth_query, (member_no, hashed_password.decode('utf-8')))  # 해싱된 패스워드 저장
 
     # 기업 정보 저장
     insert_company_query = '''
@@ -337,6 +434,32 @@ def check_email():
         return jsonify({"result":"error", "description":"이메일 중복"})
     else:
         return jsonify({"result":"success", "description":"이메일 사용가능"})
+
+#---------------------------------------로그인--------------------------------------------
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data['Email_ID']
+    password = data['Password'].encode('utf-8') # 입력받은 패스워드 인코딩
+
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
+
+    # DB에서 해당 이메일의 해시된 패스워드 가져오기
+    cursor.execute("SELECT Password FROM member_authenticationinfo WHERE MemberNo = (SELECT MemberNo FROM member_user WHERE Email_ID=%s)", (email,))
+    stored_hashed_password = cursor.fetchone()[0].encode('utf-8') # DB에 저장된 해시된 패스워드
+
+    # 해시된 패스워드와 입력받은 패스워드 비교
+    if bcrypt.checkpw(password, stored_hashed_password):
+        # 로그인 성공
+        return jsonify({'message': '로그인 성공'}), 200
+    else:
+        # 로그인 실패
+        return jsonify({'error': '로그인 실패'}), 401
+
+
+#-----------------------------------------------------------------------------------------------------------------------------------
 
 @app.route('/post/lists', methods=['GET'])
 def get_post_list():
@@ -662,38 +785,3 @@ if __name__ == '__main__':
 
 
 
-
-
-
-@app.route('/send_password_reset_code', methods=['POST'])
-def send_password_reset_code():
-    data = request.get_json()
-    phone_number = data.get('PhoneNumber')
-    email = data.get('Email_ID')
-
-    # connect to the database
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-
-    # check if the phone number and email exist in the member_user table
-    cursor.execute('SELECT * FROM member_user WHERE PhoneNumber=%s AND Email_ID=%s', (phone_number, email))
-    if cursor.fetchone() is None:
-        return jsonify({'error': '등록되지 않은 전화번호 또는 이메일입니다'}), 400
-
-    # generate a random verification code
-    verification_code = '123456'
-
-    # calculate the expiry time for the verification code
-    expiry = datetime.datetime.now() + datetime.timedelta(minutes=10)
-
-    # insert the verification code into the phone_verification table
-    cursor.execute(
-        'INSERT INTO phone_verification (PhoneNumber, VerificationCode, Expiry) VALUES (%s, %s, %s)',
-        (phone_number, verification_code, expiry)
-    )
-
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    return jsonify({'message': '인증 코드가 발송되었습니다'}), 200
