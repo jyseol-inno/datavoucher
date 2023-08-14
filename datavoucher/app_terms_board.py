@@ -1,5 +1,6 @@
-from flask import Flask, Response, request, jsonify, session, render_template, send_from_directory, send_file
+from flask import Flask, Response, request, jsonify, session, render_template, send_from_directory, send_file, redirect, url_for
 from flask_session import Session  # 서버 측 세션을 위한 Flask-Session 추가
+from flask_mail import Mail, Message
 import mysql.connector
 import random
 from datetime import datetime
@@ -10,13 +11,33 @@ import pandas as pd
 import datetime
 import string
 import bcrypt
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+import string
 
 app = Flask(__name__)
 app.config['SESSION_TYPE'] = 'filesystem'  # 세션 데이터를 파일 시스템에 저장
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 465
+app.config['MAIL_USE_TLS'] = False
+app.config['MAIL_USE_SSL'] = True
+app.config['MAIL_USERNAME'] = 'jysul8230@gmail.com'
+app.config['MAIL_PASSWORD'] = 'orxfvcuiylkunrmb'
+
+mail = Mail(app)
 Session(app)  # 앱에 세션 설정 적용
 
+# 랜덤한 문자열 생성 함수 (확인 코드용)
+def generate_verification_code(length=6):
+    characters = string.ascii_letters + string.digits
+    return ''.join(random.choice(characters) for _ in range(length))
 
-
+# 이메일 전송 및 확인 코드 발급
+def send_verification_email(email, verification_code):
+    msg = Message('Email Verification', sender='jysul8230@gmail.com', recipients=[email])
+    msg.body = f'Your verification code is: {verification_code}'
+    mail.send(msg)
 
 # MariaDB 연결 정보
 db_config = {
@@ -60,11 +81,39 @@ cursor.close()
 conn.close()
 
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def index():
-    return render_template('index.html')
+    if request.method == 'POST':
+        # email = request.form['email']
+        email = 'hjpark@innopost21.com'
 
+        # 랜덤한 확인 코드 생성
+        verification_code = generate_verification_code()
 
+        # 생성된 코드를 세션에 저장
+        session['verification_code'] = verification_code
+        session['email'] = 'hjpark@innopost21.com'
+
+        # 이메일 전송
+        send_verification_email(email, verification_code)
+    return jsonify({})
+
+@app.route('/verify', methods=['GET', 'POST'])
+def verify():
+    if request.method == 'POST':
+        entered_code = request.form['code']
+
+        # 세션에서 저장된 코드와 이메일 가져오기
+        saved_code = session.get('verification_code')
+        email = session.get('email')
+
+        if entered_code == saved_code:
+            # 코드 일치 - 본인 인증 완료
+            return f'Email verification successful for {email}!'
+        else:
+            return 'Verification code is incorrect. Please try again.'
+
+    # return render_template('verify.html')
 
 # -----------------------------------약관동의---------------------------------------
 @app.route('/agreement', methods=['POST'])
@@ -87,10 +136,6 @@ def agreement():
 
     return jsonify({'message': '약관 동의가 완료되었습니다'}), 200
 
-
-
-
-
 #---------------------------------가입시 이메일 인증---------------------------------------
 @app.route('/email_verification', methods=['POST'])
 def email_verification():
@@ -111,12 +156,6 @@ def email_verification():
     session['verification_code'] = verification_code
 
     return jsonify({'message': '인증 코드가 발송되었습니다'}), 200
-
-
-
-
-
-
 
 @app.route('/verify_code', methods=['POST'])
 def verify_code():
@@ -522,15 +561,17 @@ def update_profile():
 
 @app.route('/post/lists', methods=['GET'])
 def get_post_list():
-    
+    data = request.get_json()
+    MemberNo = data.get('MemberNo')
+
     sql = '''
-            SELECT PostID, organization, notice, apply_end, tag, budget, views
-            FROM POSTS 
+            SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN
+            FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID
           '''
 
     conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor()
-    cursor.execute(sql)
+    cursor.execute(sql, (MemberNo,))
     posts = cursor.fetchall()
 
     posts_list = []
@@ -551,6 +592,7 @@ def get_post_list():
             'tag': post[4],
             'budget': post[5],
             'views': post[6],
+            'bookmarkYN': post[7]
         }
         posts_list.append(post_dict)
     total_count = len(posts_list)
@@ -609,16 +651,91 @@ def delete_bookmark():
     conn.close()
     return jsonify({"result": "success", "description":"즐겨찾기 삭제 성공"})
 
+@app.route('/post/lists/recommend', methods=['GET'])
+def get_post_recommend_list():
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
+    data = request.get_json()
+    MemberNo = data.get('MemberNo')
+
+    sql = "SELECT InterestKeywords FROM MEMBER_COMPANY WHERE MemberNo = %s"
+    cursor.execute(sql, (MemberNo,))
+    interestKeywords = cursor.fetchone()
+    interestKeywords = interestKeywords[0]
+    sql = '''
+            SELECT p.PostID, p.organization, p.notice, p.apply_end, p.budget, p.post_date, p.part, p.department, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN
+            FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID
+          '''
+
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
+    cursor.execute(sql, (MemberNo,))
+    posts = cursor.fetchall()
+
+    posts_list = []
+    for post in posts:
+        # print(post[3])
+        if (post[3]=='-'):
+            days_left = '확정안됨'
+        else:
+            deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
+            today = datetime.now().date()
+            days_left = (today - deadline).days
+        
+        post_dict = {
+            'PostID': post[0],
+            'organization': post[1],
+            'notice': post[2], 
+            'days_left': days_left,
+            'budget': post[4],
+            'post_date': post[5],
+            'part': post[6],
+            'department': post[7],
+            'bookmarkYN': post[8],
+        }
+        posts_list.append(post_dict)
+    columns = ['PostID', 'organization', 'notice', 'days_left', 'budget', 'post_date', 'part', 'department', 'bookmarkYN']
+    df = pd.DataFrame(posts_list, columns=columns)
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(df['notice'].tolist())
+    target_tfidf = vectorizer.transform([interestKeywords])
+
+    # 코사인 유사도 계산
+    similarities = cosine_similarity(tfidf_matrix, target_tfidf)
+
+    # 유사도가 높은 순서대로 인덱스 정렬
+    similar_indices = similarities.argsort(axis=0)[::-1].flatten()
+    unique_indices = []
+    for ind in similar_indices:
+        if ind not in unique_indices:
+            unique_indices.append(ind)
+    recommend_df = df.iloc[unique_indices[:5]]
+    
+    recommend_data_list = []
+    for index, row in recommend_df.iterrows():
+        entry = {
+            'PostID': row['PostID'],
+            'organization': row['organization'],
+            'notice': row['notice'],
+            'budget': row['budget'],
+            'post_date': row['post_date'],
+            'part': row['part'],
+            'department': row['department'],
+            'days_left': row['days_left'],
+            'bookmarkYN': row['bookmarkYN']
+        }
+        recommend_data_list.append(entry)
+    total_count = len(recommend_data_list)
+    return jsonify({"meta": {"total_count": total_count}, "documents": recommend_data_list})
+
 @app.route('/post/lists/bookmark', methods=['GET'])
 def get_post_bookmark_list():
     conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor()
     data = request.get_json()
     MemberNo = data.get('MemberNo')
-
-    sql = "SELECT PostID, organization, notice, apply_end, tag, budget, views FROM POSTS WHERE PostID in (SELECT PostID FROM BOOKMARK WHERE MemberNo = %s)"
-
-    cursor.execute(sql, (MemberNo,))
+    sql = "SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID WHERE p.PostID in (SELECT PostID FROM BOOKMARK WHERE MemberNo = %s)"
+    cursor.execute(sql, (MemberNo, MemberNo))
     bookmark_posts = cursor.fetchall()
     bookmark_posts_list = []
     for post in bookmark_posts:
@@ -638,6 +755,7 @@ def get_post_bookmark_list():
             'tag': post[4],
             'budget': post[5],
             'views': post[6],
+            'bookmarkYN': post[7],
         }
         bookmark_posts_list.append(post_dict)
     total_count = len(bookmark_posts_list)
@@ -722,14 +840,14 @@ def get_search_post_list():
     startDate = data.get('startDate')
     endDate = data.get('endDate')
     registerClosingYN = data.get('registerClosingYN', 'Y')
-    bookmarkYN = data.get('bookmarkYN', 'N')
+    bookmarkPageYN = data.get('bookmarkPageYN', 'N')
     MemberNo = data.get('MemberNo')
     # startBudget = data.get('startBudget')
     # endBudget = data.get('endBudget')
 
     conditions = []
     params = []
-
+    params.append(MemberNo)
     # 서울특별시, 경기도, 인천광역시, 강원도, 충청남도, 대전광역시,
     # 충청북도, 세종특별자치시, 부산광역시, 울산광역시, 대구광역시,
     # 경상북도, 경상남도, 전라남도, 광주광역시, 전라북도, 제주특별자치도, 중앙부처
@@ -791,10 +909,10 @@ def get_search_post_list():
         params.append(MemberNo)
     
     if len(conditions) == 0:
-        sql = "SELECT PostID, organization, notice, apply_end, tag, budget, views FROM POSTS"
+        sql = "SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID"
     else:
-        sql = "SELECT PostID, organization, notice, apply_end, tag, budget, views FROM POSTS WHERE "
-    
+        sql = "SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID WHERE "
+        
     sql = sql + ' AND '.join(conditions)
     conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor()
@@ -821,6 +939,7 @@ def get_search_post_list():
             'tag': post[4],
             'budget': post[5],
             'views': post[6],
+            'bookmarkYN': post[7]
         }
         search_posts_list.append(post_dict)
     total_count = len(search_posts_list)
