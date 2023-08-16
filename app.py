@@ -1,6 +1,7 @@
 from flask import Flask, Response, request, jsonify, session, render_template, send_from_directory, send_file, redirect, url_for
 from flask_session import Session  
 from flask_mail import Mail, Message
+from flask_restx import Api, Resource, fields
 import mysql.connector
 import random
 from datetime import datetime
@@ -20,8 +21,10 @@ from functools import wraps
 
 
 
-app = Flask(__name__)
 
+app = Flask(__name__)
+api = Api(app, version='1.0', title='API 문서', description='Swagger 문서', doc="/api-docs")
+test_api = api.namespace('test', description='조회 API')
 
 
 app.config['SESSION_TYPE'] = 'filesystem'  # 세션 유형 설정, 데이터를 파일 시스템에 저장
@@ -77,82 +80,87 @@ def send_verification_email(email, verification_code):
 #     return response.status_code
 
 
+model = api.model('ModelName', {
+    'field1': fields.String(required=True, description='Description of field 1'),
+    'field2': fields.Integer(required=True, description='Description of field 2')
+})
 
 #----------------------------------------회원가입------------------------------------------------------
-@app.route('/signup/info', methods=['POST'])
-def signup_info():
+@test_api.route('/signup/info')
+class signup_info(Resource):
+    @api.expect(model, validate=True)
+    def post(self):
+        # JSON 데이터 한 번에 받기
+        data = api.payload
 
-    # JSON 데이터 한 번에 받기
-    data = request.get_json()
-
-    # 약관동의
-    required_agreements = ['AgreeService', 'AgreePrivacy']
-    for agreement in required_agreements:
-        if data.get(agreement) is not True:
-            return jsonify({'error': '필수 약관에 동의해주세요'}), 400
-    
-    # 약관 동의 정보 세션에 저장
-    session['agree_service'] = data['AgreeService']
-    session['agree_privacy'] = data['AgreePrivacy']
-    session['agree_marketing'] = data.get('AgreeMarketing', False) # 마케팅 동의는 선택사항이므로 기본값을 False로 설정
-
-    # 회원정보 필수 필드 확인
-    required_fields = ['Email_ID', 'Name', 'Password', 'PhoneNumber', 
-                       'BusinessRegistrationNumber', 'CompanyAddress', 'EstablishedDate', 'CEO', 'CompanySize', 
-                       'CompanyType', 'EmployeeCount', 'InterestKeywords']
-    
-    if not all(field in data for field in required_fields):
-        return jsonify({'error': '모든 회원정보를 입력해주세요'}), 400
-
-    email = data['Email_ID']
-    name = data['Name']
-    password = data['Password'].encode('utf-8') # 패스워드 인코딩
-    hashed_password = bcrypt.hashpw(password, bcrypt.gensalt())  # 패스워드 해싱
-    phone = data['PhoneNumber']
-    company_info = {
-        'BusinessRegistrationNumber': data['BusinessRegistrationNumber'],
-        'CompanyAddress': data['CompanyAddress'],
-        'EstablishedDate': data['EstablishedDate'],
-        'CEO': data['CEO'],
-        'CompanySize': data['CompanySize'],
-        'CompanyType': data['CompanyType'],
-        'EmployeeCount': data['EmployeeCount'],
-        'InterestKeywords': data['InterestKeywords']
-    }
-
-    
-    
-    # 세션에 정보 저장
-    session['signup_info'] = {
-    'Email_ID': email,
-    'Name': name,
-    'hashed_password': hashed_password.decode('utf-8'),
-    'PhoneNumber': phone,
-    'company_info': company_info
-    }
-
-
-
-    # MariaDB 연결
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-
-    # 이메일 중복확인 
-    cursor.execute("SELECT COUNT(*) FROM member_user WHERE Email_ID=%s", (email,))
-    result = cursor.fetchone()
-    
-    if result[0] > 0:
-        return jsonify({"result":"error", "description":"이미 가입된 이메일입니다."}), 400
-    
-    # 이메일 인증 코드 발송
-    
-    verification_code = generate_verification_code()
-    session['verification_code'] = verification_code
-    session['email'] = email    
-    send_verification_email(email, verification_code)
+        # 약관동의
+        required_agreements = ['AgreeService', 'AgreePrivacy']
+        for agreement in required_agreements:
+            if data.get(agreement) is not True:
+                return jsonify({'error': '필수 약관에 동의해주세요'}), 400
         
+        # 약관 동의 정보 세션에 저장
+        session['agree_service'] = data['AgreeService']
+        session['agree_privacy'] = data['AgreePrivacy']
+        session['agree_marketing'] = data.get('AgreeMarketing', False) # 마케팅 동의는 선택사항이므로 기본값을 False로 설정
 
-    return jsonify({'message': '회원 정보가 저장되었습니다. 이메일 인증을 진행해주세요.'}), 200
+        # 회원정보 필수 필드 확인
+        required_fields = ['Email_ID', 'Name', 'Password', 'PhoneNumber', 
+                        'BusinessRegistrationNumber', 'CompanyAddress', 'EstablishedDate', 'CEO', 'CompanySize', 
+                        'CompanyType', 'EmployeeCount', 'InterestKeywords']
+        
+        if not all(field in data for field in required_fields):
+            return jsonify({'error': '모든 회원정보를 입력해주세요'}), 400
+
+        email = data['Email_ID']
+        name = data['Name']
+        password = data['Password'].encode('utf-8') # 패스워드 인코딩
+        hashed_password = bcrypt.hashpw(password, bcrypt.gensalt())  # 패스워드 해싱
+        phone = data['PhoneNumber']
+        company_info = {
+            'BusinessRegistrationNumber': data['BusinessRegistrationNumber'],
+            'CompanyAddress': data['CompanyAddress'],
+            'EstablishedDate': data['EstablishedDate'],
+            'CEO': data['CEO'],
+            'CompanySize': data['CompanySize'],
+            'CompanyType': data['CompanyType'],
+            'EmployeeCount': data['EmployeeCount'],
+            'InterestKeywords': data['InterestKeywords']
+        }
+
+        
+        
+        # 세션에 정보 저장
+        session['signup_info'] = {
+        'Email_ID': email,
+        'Name': name,
+        'hashed_password': hashed_password.decode('utf-8'),
+        'PhoneNumber': phone,
+        'company_info': company_info
+        }
+
+
+
+        # MariaDB 연결
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+
+        # 이메일 중복확인 
+        cursor.execute("SELECT COUNT(*) FROM member_user WHERE Email_ID=%s", (email,))
+        result = cursor.fetchone()
+        
+        if result[0] > 0:
+            return jsonify({"result":"error", "description":"이미 가입된 이메일입니다."}), 400
+        
+        # 이메일 인증 코드 발송
+        
+        verification_code = generate_verification_code()
+        session['verification_code'] = verification_code
+        session['email'] = email    
+        send_verification_email(email, verification_code)
+            
+
+        return jsonify({'message': '회원 정보가 저장되었습니다. 이메일 인증을 진행해주세요.'}), 200
 
 
 @app.route('/signup/verify', methods=['POST'])
