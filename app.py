@@ -1,7 +1,7 @@
 from flask import Flask, Response, request, jsonify, session, render_template, send_from_directory, send_file, redirect, url_for
 from flask_session import Session  
 from flask_mail import Mail, Message
-from flask_restx import Api, Resource, fields
+from flask_restx import Api, Resource, fields, reqparse
 import mysql.connector
 import random
 from datetime import datetime
@@ -9,7 +9,6 @@ import os
 import urllib.parse
 import copy
 import pandas as pd
-import datetime
 import string
 import bcrypt
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -533,392 +532,447 @@ def update_profile():
 
 
 #-----------------------------------------------------------------------------------------------------------------------------------
+post_lists_api = api.namespace('공고조회', description='공고조회 API')
+member_model = api.model('member_model', {
+    'MemberNo': fields.Integer(required=True, description='회원 고유 번호')
+})
+@post_lists_api.route('/post/lists')
+class get_post_list(Resource):
+    @api.expect(member_model, validate=True)
+    def post(self):
+        data = api.payload
+        MemberNo = data.get('MemberNo')
 
-@app.route('/post/lists', methods=['GET'])
-def get_post_list():
-    data = request.get_json()
-    MemberNo = data.get('MemberNo')
+        sql = '''
+                SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN
+                FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID
+            '''
 
-    sql = '''
-            SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN
-            FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID
-          '''
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        cursor.execute(sql, (MemberNo,))
+        posts = cursor.fetchall()
 
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-    cursor.execute(sql, (MemberNo,))
-    posts = cursor.fetchall()
-
-    posts_list = []
-    for post in posts:
-        # print(post[3])
-        if (post[3]=='-'):
-            days_left = '확정안됨'
-        else:
-            deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
-            today = datetime.now().date()
-            days_left = (today - deadline).days
-        
-        post_dict = {
-            'PostID': post[0],
-            'organization': post[1],
-            'notice': post[2], 
-            'days_left': days_left,
-            'tag': post[4],
-            'budget': post[5],
-            'views': post[6],
-            'bookmarkYN': post[7]
-        }
-        posts_list.append(post_dict)
-    total_count = len(posts_list)
-    return jsonify({"meta": {"total_count": total_count}, "documents": posts_list})
-
-@app.route('/post/lists/<int:PostID>/download/<string:pfi_originname>', methods=['GET'])
-def download_attachment(PostID, pfi_originname):
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-
-    sql = '''
-            SELECT pfi_originname, pfi_filename
-            FROM POST_FILE
-            WHERE PostID = %s and pfi_originname = %s
-          '''
-        
-    cursor.execute(sql, (PostID, pfi_originname,))
-    attachment = cursor.fetchone()
-    pfi_originname = attachment[0]
-    pfi_filename = attachment[1]
-    attachment_folder = 'attachment_folder'
-    script_dir = os.path.dirname(__file__)
-    filepath = os.path.join(script_dir, attachment_folder, pfi_filename)
-    #print('filepath', filepath)
-    return send_file(filepath, as_attachment=True, download_name=pfi_originname)
-
-@app.route('/post/bookmark/insert', methods=['POST'])
-def insert_bookmark():
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-    data = request.get_json()
-    MemberNo = data.get('MemberNo')
-    PostID = data.get('PostID')
-
-    sql = "INSERT INTO BOOKMARK (MemberNo, PostID) VALUES (%s, %s)"
-
-    cursor.execute(sql, (MemberNo, PostID))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return jsonify({"result": "success", "description":"즐겨찾기 추가 성공"})
-
-@app.route('/post/bookmark/delete', methods=['DELETE'])
-def delete_bookmark():
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-    data = request.get_json()
-    MemberNo = data.get('MemberNo')
-    PostID = data.get('PostID')
-
-    sql = "DELETE FROM BOOKMARK WHERE MemberNo=%s AND PostID=%s"
-
-    cursor.execute(sql, (MemberNo, PostID))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return jsonify({"result": "success", "description":"즐겨찾기 삭제 성공"})
-
-@app.route('/post/lists/recommend', methods=['GET'])
-def get_post_recommend_list():
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-    data = request.get_json()
-    MemberNo = data.get('MemberNo')
-
-    sql = "SELECT InterestKeywords FROM MEMBER_COMPANY WHERE MemberNo = %s"
-    cursor.execute(sql, (MemberNo,))
-    interestKeywords = cursor.fetchone()
-    interestKeywords = interestKeywords[0]
-    sql = '''
-            SELECT p.PostID, p.organization, p.notice, p.apply_end, p.budget, p.post_date, p.part, p.department, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN
-            FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID
-          '''
-
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-    cursor.execute(sql, (MemberNo,))
-    posts = cursor.fetchall()
-
-    posts_list = []
-    for post in posts:
-        # print(post[3])
-        if (post[3]=='-'):
-            days_left = '확정안됨'
-        else:
-            deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
-            today = datetime.now().date()
-            days_left = (today - deadline).days
-        
-        post_dict = {
-            'PostID': post[0],
-            'organization': post[1],
-            'notice': post[2], 
-            'days_left': days_left,
-            'budget': post[4],
-            'post_date': post[5],
-            'part': post[6],
-            'department': post[7],
-            'bookmarkYN': post[8],
-        }
-        posts_list.append(post_dict)
-    columns = ['PostID', 'organization', 'notice', 'days_left', 'budget', 'post_date', 'part', 'department', 'bookmarkYN']
-    df = pd.DataFrame(posts_list, columns=columns)
-    vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform(df['notice'].tolist())
-    target_tfidf = vectorizer.transform([interestKeywords])
-
-    # 코사인 유사도 계산
-    similarities = cosine_similarity(tfidf_matrix, target_tfidf)
-
-    # 유사도가 높은 순서대로 인덱스 정렬
-    similar_indices = similarities.argsort(axis=0)[::-1].flatten()
-    unique_indices = []
-    for ind in similar_indices:
-        if ind not in unique_indices:
-            unique_indices.append(ind)
-    recommend_df = df.iloc[unique_indices[:5]]
-    
-    recommend_data_list = []
-    for index, row in recommend_df.iterrows():
-        entry = {
-            'PostID': row['PostID'],
-            'organization': row['organization'],
-            'notice': row['notice'],
-            'budget': row['budget'],
-            'post_date': row['post_date'],
-            'part': row['part'],
-            'department': row['department'],
-            'days_left': row['days_left'],
-            'bookmarkYN': row['bookmarkYN']
-        }
-        recommend_data_list.append(entry)
-    total_count = len(recommend_data_list)
-    return jsonify({"meta": {"total_count": total_count}, "documents": recommend_data_list})
-
-@app.route('/post/lists/bookmark', methods=['GET'])
-def get_post_bookmark_list():
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-    data = request.get_json()
-    MemberNo = data.get('MemberNo')
-    sql = "SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID WHERE p.PostID in (SELECT PostID FROM BOOKMARK WHERE MemberNo = %s)"
-    cursor.execute(sql, (MemberNo, MemberNo))
-    bookmark_posts = cursor.fetchall()
-    bookmark_posts_list = []
-    for post in bookmark_posts:
-        # print(post[3])
-        if (post[3]=='-'):
-            days_left = '확정안됨'
-        else:
-            deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
-            today = datetime.now().date()
-            days_left = (today - deadline).days
-        
-        post_dict = {
-            'PostID': post[0],
-            'organization': post[1],
-            'notice': post[2], 
-            'days_left': days_left,
-            'tag': post[4],
-            'budget': post[5],
-            'views': post[6],
-            'bookmarkYN': post[7],
-        }
-        bookmark_posts_list.append(post_dict)
-    total_count = len(bookmark_posts_list)
-    return jsonify({"meta": {"total_count": total_count}, "documents": bookmark_posts_list})
-
-@app.route('/post/lists/<int:PostID>', methods=['GET'])
-def get_post(PostID):
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-
-    # 조회수 증가
-    update_sql = '''
-            UPDATE POSTS SET views = views + 1
-            WHERE PostID = %s
-          '''
-    cursor.execute(update_sql, (PostID,))
-    conn.commit()
-
-    sql = '''
-            SELECT PostID, part, `object`, department, organization, post_date, notice, apply_start, apply_end, budget, overview
-            FROM POSTS
-            WHERE PostID = %s
-          '''
-
-    cursor.execute(sql, (PostID,))
-    post = cursor.fetchall()
-    post = post[0]
-    
-    #print('post', post)
-    # 첨부파일
-    sql = '''
-            SELECT pfi_originname, pfi_filename
-            FROM POST_FILE
-            WHERE PostID = %s
-          '''
-
-    cursor.execute(sql, (PostID,))
-    attachments = cursor.fetchall()
-    attachment_list = []
-    for attachment in attachments:
-        attachment_list.append(
-            {
-                'pfi_originname':attachment[0],
-                'pfi_filename':attachment[1]
+        posts_list = []
+        for post in posts:
+            # print(post[3])
+            if (post[3]=='-'):
+                days_left = '확정안됨'
+            else:
+                deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
+                today = datetime.now().date()
+                days_left = (today - deadline).days
+            
+            post_dict = {
+                'PostID': post[0],
+                'organization': post[1],
+                'notice': post[2], 
+                'days_left': days_left,
+                'tag': post[4],
+                'budget': post[5],
+                'views': post[6],
+                'bookmarkYN': post[7]
             }
-        )
-    
-    # print('attachment_list', attachment_list)
-    
-    if (post[8]=='-'):
-            days_left = '확정안됨'
-    else:
-        deadline = datetime.strptime(post[8], '%Y-%m-%d').date()
-        today = datetime.now().date()
-        days_left = (today - deadline).days
-    
-    post_dict = {
-            'PostID': post[0],
-            'part': post[1],
-            'object' : post[2],
-            'department': post[3],
-            'organization': post[4],
-            'post_date': post[5],
-            'notice': post[6], 
-            'days_left': days_left,
-            'apply_start': post[7],
-            'apply_end': post[8],
-            'budget': post[9],
-            'overview': post[10],
-            'attachments': attachment_list
-    }
-    return jsonify({"document" : post_dict})
+            posts_list.append(post_dict)
+        total_count = len(posts_list)
+        return jsonify({"meta": {"total_count": total_count}, "documents": posts_list})
 
-@app.route('/post/lists/search', methods=['GET'])
-def get_search_post_list():
-    data = request.get_json()
-    department = data.get('department', [])
-    company = data.get('company', [])
-    supportType = data.get('supportType', [])
-    part = data.get('part', [])
-    postDateYN = data.get('postDateYN', 'Y')
-    startDate = data.get('startDate')
-    endDate = data.get('endDate')
-    registerClosingYN = data.get('registerClosingYN', 'Y')
-    bookmarkPageYN = data.get('bookmarkPageYN', 'N')
-    MemberNo = data.get('MemberNo')
-    # startBudget = data.get('startBudget')
-    # endBudget = data.get('endBudget')
+download_attachment_api = api.namespace('첨부파일다운로드', description='첨부파일 다운로드 API')
+download_model = api.model('download_model', {
+    'PostID': fields.Integer(required=True, description='문서 고유번호'),
+    'pfi_originname': fields.String(required=True, description='원본 파일명')
+})
+@download_attachment_api.route('/post/lists/download')
+class download_attachment(Resource):
+    @api.expect(download_model, validate=True)
+    def post(self):
+        data = api.payload
+        PostID = data['PostID']
+        pfi_originname = data['pfi_originname']
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
 
-    conditions = []
-    params = []
-    params.append(MemberNo)
-    # 서울특별시, 경기도, 인천광역시, 강원도, 충청남도, 대전광역시,
-    # 충청북도, 세종특별자치시, 부산광역시, 울산광역시, 대구광역시,
-    # 경상북도, 경상남도, 전라남도, 광주광역시, 전라북도, 제주특별자치도, 중앙부처
-    if department:
-        if '중앙부처' in department:
-            department.remove('중앙부처')
-            department.extend(['산업통상자원부', '고용노동부', '중소벤처기업부', '과학기술정보통신부', '문화체육관광부', '농림축산식품부', '해양수산부', '국토교통부', '환경부', '방위사업청', '보건복지부',
-            '여성가족부', '교육부'])
-        conditions.append("department IN (" + ','.join('%s' for _ in department) + ")")
-        params.extend(department)
-    # ['사회적기업', '중소기업', '소상공인', '장애인기업', '여성기업', '벤처기업']
-    if company:
-        conditions.append("company IN (" + ','.join('%s' for _ in company) + ")")
-        params.extend(company)
-    # ["일반", "청년", "여성", "장애인"]
-    if supportType:
-        if '일반' in supportType:
-            filtered_list = [item for item in supportType if item != '일반']
-            not_like_conditions = ' AND '.join([f"notice NOT LIKE %s" for _ in filtered_list])
-            like_conditions = ' OR '.join([f"notice LIKE %s" for _ in filtered_list])        
-            conditions.append(f"(({not_like_conditions}) OR ({like_conditions}))")
-            params.extend(['%' + keyword + '%' for keyword in filtered_list])
-            params.extend(['%' + keyword + '%' for keyword in filtered_list])
-        else:
-            like_conditions = ' OR '.join([f"notice LIKE %s" for _ in supportType])
-            conditions.append(f"({like_conditions})")
-            params.extend(['%' + keyword + '%' for keyword in supportType])
-    # ['인력']            
-    if part:
-        conditions.append("part IN (" + ','.join('%s' for _ in part) + ")")
-        params.extend(part)
-    if postDateYN=='Y':
-        if not startDate and endDate:
-            conditions.append("post_date <= %s")
-            params.extend([endDate])
-        elif startDate and not endDate:
-            conditions.append("post_date >= %s")
-            params.extend([startDate])
-        elif startDate and endDate:
-            conditions.append("post_date >= %s AND post_date <= %s")
-            params.extend([startDate, endDate])
-    elif postDateYN=='N':
-        if not startDate and endDate:
-            conditions.append("apply_end <= %s")
-            params.extend([endDate])
-        elif startDate and not endDate:
-            conditions.append("apply_start >= %s")
-            params.extend([startDate])
-        elif startDate and endDate:
-            conditions.append("apply_start >= %s AND apply_end <= %s")
-            params.extend([startDate, endDate])
-    if registerClosingYN=='Y':
-        today = datetime.now().date()
-        conditions.append("apply_end >= %s")
-        params.append(str(today))
-    
-    if bookmarkYN=='Y':
-        conditions.append('PostID in (SELECT PostID FROM BOOKMARK WHERE MemberNo = %s)')
-        params.append(MemberNo)
-    
-    if len(conditions) == 0:
-        sql = "SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID"
-    else:
-        sql = "SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID WHERE "
+        sql = '''
+                SELECT pfi_originname, pfi_filename
+                FROM POST_FILE
+                WHERE PostID = %s and pfi_originname = %s
+                '''
+            
+        cursor.execute(sql, (PostID, pfi_originname,))
+        attachment = cursor.fetchone()
+        pfi_originname = attachment[0]
+        pfi_filename = attachment[1]
+        attachment_folder = 'attachment_folder'
+        script_dir = os.path.dirname(__file__)
+        filepath = os.path.join(script_dir, attachment_folder, pfi_filename)
+        #print('filepath', filepath)
+        return send_file(filepath, as_attachment=True, download_name=pfi_originname)
+
+bookmark_insert_api = api.namespace('즐겨찾기추가', description='즐겨찾기 추가 API')
+bookmark_model = api.model('bookmark_model', {
+    'MemberNo': fields.Integer(required=True, description='회원 고유 번호'),
+    'PostID': fields.Integer(required=True, description='문서 고유번호')
+})
+@bookmark_insert_api.route('/post/bookmark/insert')
+class insert_bookmark(Resource):
+    @api.expect(bookmark_model, validate=True)
+    def post(self):
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        data = api.payload
+        MemberNo = data.get('MemberNo')
+        PostID = data.get('PostID')
+        sql = "INSERT INTO BOOKMARK (MemberNo, PostID) VALUES (%s, %s)"
+
+        cursor.execute(sql, (MemberNo, PostID))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"result": "success", "description":"즐겨찾기 추가 성공"})
+
+bookmark_delete_api = api.namespace('즐겨찾기삭제', description='즐겨찾기 삭제 API')
+bookmark_model = api.model('bookmark_model', {
+    'MemberNo': fields.Integer(required=True, description='회원 고유 번호'),
+    'PostID': fields.Integer(required=True, description='문서 고유번호')
+})
+@bookmark_delete_api.route('/post/bookmark/delete')
+class delete_bookmark(Resource):
+    @api.expect(bookmark_model, validate=True)
+    def delete(self):
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        data = request.get_json()
+        MemberNo = data.get('MemberNo')
+        PostID = data.get('PostID')
+
+        sql = "DELETE FROM BOOKMARK WHERE MemberNo=%s AND PostID=%s"
+
+        cursor.execute(sql, (MemberNo, PostID))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"result": "success", "description":"즐겨찾기 삭제 성공"})
+
+post_recommend_api = api.namespace('AI맞춤추천공고', description='AI 맞춤 추천 공고 API')
+@post_recommend_api.route('/post/lists/recommend')
+class get_post_recommend_list(Resource):
+    @api.expect(member_model, validate=True)
+    def post(self):
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        data = request.get_json()
+        MemberNo = data.get('MemberNo')
+
+        sql = "SELECT InterestKeywords FROM MEMBER_COMPANY WHERE MemberNo = %s"
+        cursor.execute(sql, (MemberNo,))
+        interestKeywords = cursor.fetchone()
+        interestKeywords = interestKeywords[0]
+        sql = '''
+                SELECT p.PostID, p.organization, p.notice, p.apply_end, p.budget, p.post_date, p.part, p.department, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN
+                FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID
+            '''
+
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        cursor.execute(sql, (MemberNo,))
+        posts = cursor.fetchall()
+
+        posts_list = []
+        for post in posts:
+            # print(post[3])
+            if (post[3]=='-'):
+                days_left = '확정안됨'
+            else:
+                deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
+                today = datetime.now().date()
+                days_left = (today - deadline).days
+            
+            post_dict = {
+                'PostID': post[0],
+                'organization': post[1],
+                'notice': post[2], 
+                'days_left': days_left,
+                'budget': post[4],
+                'post_date': post[5],
+                'part': post[6],
+                'department': post[7],
+                'bookmarkYN': post[8],
+            }
+            posts_list.append(post_dict)
+        columns = ['PostID', 'organization', 'notice', 'days_left', 'budget', 'post_date', 'part', 'department', 'bookmarkYN']
+        df = pd.DataFrame(posts_list, columns=columns)
+        vectorizer = TfidfVectorizer()
+        tfidf_matrix = vectorizer.fit_transform(df['notice'].tolist())
+        target_tfidf = vectorizer.transform([interestKeywords])
+
+        # 코사인 유사도 계산
+        similarities = cosine_similarity(tfidf_matrix, target_tfidf)
+
+        # 유사도가 높은 순서대로 인덱스 정렬
+        similar_indices = similarities.argsort(axis=0)[::-1].flatten()
+        unique_indices = []
+        for ind in similar_indices:
+            if ind not in unique_indices:
+                unique_indices.append(ind)
+        recommend_df = df.iloc[unique_indices[:5]]
         
-    sql = sql + ' AND '.join(conditions)
-    conn = mysql.connector.connect(**db_config)
-    cursor = conn.cursor()
-    cursor.execute(sql, params)
-    searched_posts = cursor.fetchall()
-    # columns = ['PostID', 'organization', 'notice', 'apply_end', 'tag', 'budget', 'views']
-    # df = pd.DataFrame(searched_posts, columns=columns)
-    # print(df.head())
-    search_posts_list = []
-    for post in searched_posts:
-        # print(post[3])
-        if (post[3]=='-'):
-            days_left = '확정안됨'
+        recommend_data_list = []
+        for index, row in recommend_df.iterrows():
+            entry = {
+                'PostID': row['PostID'],
+                'organization': row['organization'],
+                'notice': row['notice'],
+                'budget': row['budget'],
+                'post_date': row['post_date'],
+                'part': row['part'],
+                'department': row['department'],
+                'days_left': row['days_left'],
+                'bookmarkYN': row['bookmarkYN']
+            }
+            recommend_data_list.append(entry)
+        total_count = len(recommend_data_list)
+        return jsonify({"meta": {"total_count": total_count}, "documents": recommend_data_list})
+
+post_bookmark_api = api.namespace('즐겨찾기목록', description='즐겨찾기 목록 API')
+@post_bookmark_api.route('/post/lists/bookmark')
+class get_post_bookmark_list(Resource):
+    @api.expect(member_model, validate=True)
+    def post(self):
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        data = api.payload
+        MemberNo = data.get('MemberNo')
+        sql = "SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID WHERE p.PostID in (SELECT PostID FROM BOOKMARK WHERE MemberNo = %s)"
+        cursor.execute(sql, (MemberNo, MemberNo))
+        bookmark_posts = cursor.fetchall()
+        bookmark_posts_list = []
+        for post in bookmark_posts:
+            # print(post[3])
+            if (post[3]=='-'):
+                days_left = '확정안됨'
+            else:
+                deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
+                today = datetime.now().date()
+                days_left = (today - deadline).days
+            
+            post_dict = {
+                'PostID': post[0],
+                'organization': post[1],
+                'notice': post[2], 
+                'days_left': days_left,
+                'tag': post[4],
+                'budget': post[5],
+                'views': post[6],
+                'bookmarkYN': post[7],
+            }
+            bookmark_posts_list.append(post_dict)
+        total_count = len(bookmark_posts_list)
+        return jsonify({"meta": {"total_count": total_count}, "documents": bookmark_posts_list})
+
+post_api = api.namespace('공고상세보기', description='공고 상세보기 API')
+post_parser = reqparse.RequestParser()
+post_parser.add_argument('PostID', type=int, required=True, help='문서 고유번호')
+@post_api.route('/post/lists/<int:PostID>')
+class get_post(Resource):
+    def get(self):
+        args = post_parser.parse_args()
+        PostID = args['PostID']
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+
+        # 조회수 증가
+        update_sql = '''
+                UPDATE POSTS SET views = views + 1
+                WHERE PostID = %s
+            '''
+        cursor.execute(update_sql, (PostID,))
+        conn.commit()
+
+        sql = '''
+                SELECT PostID, part, `object`, department, organization, post_date, notice, apply_start, apply_end, budget, overview
+                FROM POSTS
+                WHERE PostID = %s
+            '''
+
+        cursor.execute(sql, (PostID,))
+        post = cursor.fetchall()
+        post = post[0]
+        
+        #print('post', post)
+        # 첨부파일
+        sql = '''
+                SELECT pfi_originname, pfi_filename
+                FROM POST_FILE
+                WHERE PostID = %s
+            '''
+
+        cursor.execute(sql, (PostID,))
+        attachments = cursor.fetchall()
+        attachment_list = []
+        for attachment in attachments:
+            attachment_list.append(
+                {
+                    'pfi_originname':attachment[0],
+                    'pfi_filename':attachment[1]
+                }
+            )
+        
+        # print('attachment_list', attachment_list)
+        
+        if (post[8]=='-'):
+                days_left = '확정안됨'
         else:
-            deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
+            deadline = datetime.strptime(post[8], '%Y-%m-%d').date()
             today = datetime.now().date()
             days_left = (today - deadline).days
         
         post_dict = {
-            'PostID': post[0],
-            'organization': post[1],
-            'notice': post[2], 
-            'apply_end': days_left,
-            'tag': post[4],
-            'budget': post[5],
-            'views': post[6],
-            'bookmarkYN': post[7]
+                'PostID': post[0],
+                'part': post[1],
+                'object' : post[2],
+                'department': post[3],
+                'organization': post[4],
+                'post_date': post[5],
+                'notice': post[6], 
+                'days_left': days_left,
+                'apply_start': post[7],
+                'apply_end': post[8],
+                'budget': post[9],
+                'overview': post[10],
+                'attachments': attachment_list
         }
-        search_posts_list.append(post_dict)
-    total_count = len(search_posts_list)
-    return jsonify({"meta": {"total_count": total_count}, "documents": search_posts_list})
+        return jsonify({"document" : post_dict})
+
+search_api = api.namespace('검색', description='검색 API')
+search_model = api.model('search_model', {
+    'MemberNo': fields.Integer(required=True, description='회원 고유 번호'),
+    'department': fields.String(required=False, description='지역 검색 [서울특별시, 경기도, 인천광역시, 강원도, 충청남도, 대전광역시, 충청북도, 세종특별자치시, 부산광역시, 울산광역시, 대구광역시, 경상북도, 경상남도, 전라남도, 광주광역시, 전라북도, 제주특별자치도, 중앙부처]'),
+    'company': fields.String(required=False, description='대상 기업 [중소기업, 벤처기업, 소상공인, 사회적기업, 여성기업, 장애인기업]'),
+    'supportType': fields.String(required=False, description='인력 충원 형태 [일반, 청년, 여성, 장애인]'),
+    'part': fields.String(required=False, description='분야 [금융, 기술, 인력, 수출, 내수, 창업, 경영, 기타]'),
+    'postDateYN': fields.String(required=False, description='필터 검색 시 사용하는 날짜 기준 [Y, N] (기본값: Y)'),
+    'startDate': fields.String(required=False, description='시작 날짜 포맷: yyyy-mm-dd'),
+    'endDate': fields.String(required=False, description='종료 날짜 포맷: yyyy-mm-dd'),
+    'registerClosingYN': fields.String(required=False, description='접수 마감건 문서 제외 여부 [Y, N] (기본값: Y)'),
+    'bookmarkPageYN': fields.String(required=False, description='즐겨찾기 페이지 여부 [Y,N] (기본값: N)'),
+})
+@search_api.route('/post/lists/search')
+class get_search_post_list(Resource):
+    @api.expect(search_model, validate=True)
+    def post(self):
+        data = api.payload
+        department = data.get('department', [])
+        company = data.get('company', [])
+        supportType = data.get('supportType', [])
+        part = data.get('part', [])
+        postDateYN = data.get('postDateYN', 'Y')
+        startDate = data.get('startDate')
+        endDate = data.get('endDate')
+        registerClosingYN = data.get('registerClosingYN', 'Y')
+        bookmarkPageYN = data.get('bookmarkPageYN', 'N')
+        MemberNo = data.get('MemberNo')
+        # startBudget = data.get('startBudget')
+        # endBudget = data.get('endBudget')
+
+        conditions = []
+        params = []
+        params.append(MemberNo)
+        # 서울특별시, 경기도, 인천광역시, 강원도, 충청남도, 대전광역시,
+        # 충청북도, 세종특별자치시, 부산광역시, 울산광역시, 대구광역시,
+        # 경상북도, 경상남도, 전라남도, 광주광역시, 전라북도, 제주특별자치도, 중앙부처
+        if department:
+            if '중앙부처' in department:
+                department.remove('중앙부처')
+                department.extend(['산업통상자원부', '고용노동부', '중소벤처기업부', '과학기술정보통신부', '문화체육관광부', '농림축산식품부', '해양수산부', '국토교통부', '환경부', '방위사업청', '보건복지부',
+                '여성가족부', '교육부'])
+            conditions.append("department IN (" + ','.join('%s' for _ in department) + ")")
+            params.extend(department)
+        # ['사회적기업', '중소기업', '소상공인', '장애인기업', '여성기업', '벤처기업']
+        if company:
+            conditions.append("company IN (" + ','.join('%s' for _ in company) + ")")
+            params.extend(company)
+        # ["일반", "청년", "여성", "장애인"]
+        if supportType:
+            if '일반' in supportType:
+                filtered_list = [item for item in supportType if item != '일반']
+                not_like_conditions = ' AND '.join([f"notice NOT LIKE %s" for _ in filtered_list])
+                like_conditions = ' OR '.join([f"notice LIKE %s" for _ in filtered_list])        
+                conditions.append(f"(({not_like_conditions}) OR ({like_conditions}))")
+                params.extend(['%' + keyword + '%' for keyword in filtered_list])
+                params.extend(['%' + keyword + '%' for keyword in filtered_list])
+            else:
+                like_conditions = ' OR '.join([f"notice LIKE %s" for _ in supportType])
+                conditions.append(f"({like_conditions})")
+                params.extend(['%' + keyword + '%' for keyword in supportType])
+        # ['인력']            
+        if part:
+            conditions.append("part IN (" + ','.join('%s' for _ in part) + ")")
+            params.extend(part)
+        if postDateYN=='Y':
+            if not startDate and endDate:
+                conditions.append("post_date <= %s")
+                params.extend([endDate])
+            elif startDate and not endDate:
+                conditions.append("post_date >= %s")
+                params.extend([startDate])
+            elif startDate and endDate:
+                conditions.append("post_date >= %s AND post_date <= %s")
+                params.extend([startDate, endDate])
+        elif postDateYN=='N':
+            if not startDate and endDate:
+                conditions.append("apply_end <= %s")
+                params.extend([endDate])
+            elif startDate and not endDate:
+                conditions.append("apply_start >= %s")
+                params.extend([startDate])
+            elif startDate and endDate:
+                conditions.append("apply_start >= %s AND apply_end <= %s")
+                params.extend([startDate, endDate])
+        if registerClosingYN=='Y':
+            today = datetime.now().date()
+            conditions.append("apply_end >= %s")
+            params.append(str(today))
+        
+        if bookmarkYN=='Y':
+            conditions.append('PostID in (SELECT PostID FROM BOOKMARK WHERE MemberNo = %s)')
+            params.append(MemberNo)
+        
+        if len(conditions) == 0:
+            sql = "SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID"
+        else:
+            sql = "SELECT p.PostID, p.organization, p.notice, p.apply_end, p.tag, p.budget, p.views, CASE WHEN b.bookmarkID IS NOT NULL THEN 'Y' ELSE 'N' END AS bookmarkYN FROM POSTS p LEFT JOIN (SELECT * FROM BOOKMARK WHERE MemberNo=%s) b ON p.PostID = b.PostID WHERE "
+            
+        sql = sql + ' AND '.join(conditions)
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        searched_posts = cursor.fetchall()
+        # columns = ['PostID', 'organization', 'notice', 'apply_end', 'tag', 'budget', 'views']
+        # df = pd.DataFrame(searched_posts, columns=columns)
+        # print(df.head())
+        search_posts_list = []
+        for post in searched_posts:
+            # print(post[3])
+            if (post[3]=='-'):
+                days_left = '확정안됨'
+            else:
+                deadline = datetime.strptime(post[3], '%Y-%m-%d').date()
+                today = datetime.now().date()
+                days_left = (today - deadline).days
+            
+            post_dict = {
+                'PostID': post[0],
+                'organization': post[1],
+                'notice': post[2], 
+                'apply_end': days_left,
+                'tag': post[4],
+                'budget': post[5],
+                'views': post[6],
+                'bookmarkYN': post[7]
+            }
+            search_posts_list.append(post_dict)
+        total_count = len(search_posts_list)
+        return jsonify({"meta": {"total_count": total_count}, "documents": search_posts_list})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True)
