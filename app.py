@@ -770,13 +770,9 @@ class get_post_bookmark_list(Resource):
         return jsonify({"meta": {"total_count": total_count}, "documents": bookmark_posts_list})
 
 post_api = api.namespace('공고상세보기', description='공고 상세보기 API')
-post_parser = reqparse.RequestParser()
-post_parser.add_argument('PostID', type=int, required=True, help='문서 고유번호')
 @post_api.route('/post/lists/<int:PostID>')
 class get_post(Resource):
-    def get(self):
-        args = post_parser.parse_args()
-        PostID = args['PostID']
+    def get(self, PostID):
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
 
